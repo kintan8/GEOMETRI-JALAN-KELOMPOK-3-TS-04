@@ -288,6 +288,116 @@
   };
 
   // Convert Lat/Lon to UTM Zone & Coordinates (WGS-84 Transverse Mercator)
+    // Convert UTM Easting & Northing to Lat/Lon (WGS-84 Transverse Mercator Inverse)
+  const utmToLatLon = (easting, northing, zoneNumber = 49, hemisphere = 'S') => {
+    const a = 6378137.0;
+    const f = 1 / 298.257223563;
+    const b = a * (1 - f);
+    const e2 = (a * a - b * b) / (a * a);
+    const e_prime2 = (a * a - b * b) / (b * b);
+    const k0 = 0.9996;
+
+    const x = parseFloat(easting) - 500000.0;
+    let y = parseFloat(northing);
+    if (hemisphere === 'S') {
+      y -= 10000000.0;
+    }
+
+    const cm = (zoneNumber - 1) * 6 - 180 + 3;
+    const cm_rad = (cm * Math.PI) / 180;
+
+    const M = y / k0;
+    const mu = M / (a * (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * Math.pow(e2, 3) / 256));
+
+    const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+    const phi1 = mu + (3 * e1 / 2 - 27 * Math.pow(e1, 3) / 32) * Math.sin(2 * mu)
+      + (21 * e1 * e1 / 16 - 55 * Math.pow(e1, 4) / 32) * Math.sin(4 * mu)
+      + (151 * Math.pow(e1, 3) / 96) * Math.sin(6 * mu);
+
+    const N1 = a / Math.sqrt(1 - e2 * Math.sin(phi1) * Math.sin(phi1));
+    const T1 = Math.tan(phi1) * Math.tan(phi1);
+    const C1 = e_prime2 * Math.cos(phi1) * Math.cos(phi1);
+    const R1 = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(phi1) * Math.sin(phi1), 1.5);
+    const D = x / (N1 * k0);
+
+    const lat = phi1 - (N1 * Math.tan(phi1) / R1) * (D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * e_prime2) * Math.pow(D, 4) / 24 + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * e_prime2 - 3 * C1 * C1) * Math.pow(D, 6) / 720);
+    const lon = cm_rad + (D - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6 + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * e_prime2 + 24 * T1 * T1) * Math.pow(D, 5) / 120) / Math.cos(phi1);
+
+    return {
+      lat: parseFloat(((lat * 180) / Math.PI).toFixed(6)),
+      lon: parseFloat(((lon * 180) / Math.PI).toFixed(6))
+    };
+  };
+
+  // Smart Parser for Any Coordinate String (Timuran & Utaraan, DMS, or Decimal)
+  const parseAnyCoordinate = (str, zoneNumber = 49, hemisphere = 'S') => {
+    str = (str || '').trim();
+    if (!str) return null;
+
+    // 1. DMS pattern: e.g. 7° 28' 21.41" LS, 110° 13' 20.42" BT
+    const dmsRegex = /(\d+)\s*°\s*(\d+)\s*['′]\s*([\d.]+)\s*["″]?\s*([NSEWLSBUtkKk]+)?/gi;
+    const dmsMatches = [...str.matchAll(dmsRegex)];
+    if (dmsMatches.length >= 2) {
+      const conv = (m) => {
+        const d = parseFloat(m[1]) || 0;
+        const mi = parseFloat(m[2]) || 0;
+        const s = parseFloat(m[3]) || 0;
+        const h = (m[4] || '').toUpperCase();
+        let val = d + mi / 60 + s / 3600;
+        if (h.includes('S') || h.includes('LS') || h.includes('W') || h.includes('BB')) {
+          val = -val;
+        }
+        return parseFloat(val.toFixed(6));
+      };
+      return {
+        type: 'dms',
+        lat: conv(dmsMatches[0]),
+        lon: conv(dmsMatches[1])
+      };
+    }
+
+    // 2. Extract numeric values
+    const nums = str.match(/[-+]?\d*\.?\d+/g);
+    if (!nums || nums.length < 2) return null;
+
+    const n1 = parseFloat(nums[0]);
+    const n2 = parseFloat(nums[1]);
+
+    // 3. Timuran (Easting) & Utaraan (Northing)
+    // Numbers > 10,000 are UTM projection coordinates in meters
+    if (Math.abs(n1) > 10000 || Math.abs(n2) > 10000) {
+      let easting = n1, northing = n2;
+      // In Southern Hemisphere (Indonesia Java/Bali/NTT/Papua), Utaraan is 8-10 million
+      if (n1 > 1000000 && n2 < 1000000) {
+        northing = n1;
+        easting = n2;
+      } else if (n2 > 1000000 && n1 < 1000000) {
+        easting = n1;
+        northing = n2;
+      }
+      const geo = utmToLatLon(easting, northing, zoneNumber, hemisphere);
+      return {
+        type: 'utm',
+        easting,
+        northing,
+        lat: geo.lat,
+        lon: geo.lon
+      };
+    }
+
+    // 4. Decimal Lat/Lon
+    let lat = n1, lon = n2;
+    if (Math.abs(n1) > 90 && Math.abs(n2) <= 90) {
+      lon = n1;
+      lat = n2;
+    }
+    return {
+      type: 'dd',
+      lat: parseFloat(lat.toFixed(6)),
+      lon: parseFloat(lon.toFixed(6))
+    };
+  };
+
   const latLonToUtm = (lat, lon) => {
     if (lat === null || lat === undefined || lon === null || lon === undefined) {
       return { zoneStr: 'Zona 49S', easting: 0, northing: 0, cm: 111, bounds: '108° - 114° BT', provinceDesc: 'Jawa Tengah' };
@@ -365,6 +475,9 @@
       const [coordMode, setCoordMode] = useState('gps');
       const [coordFormat, setCoordFormat] = useState('dms'); // 'dms' (Derajat Menit Detik), 'dd' (Derajat Desimal), 'utm' (Grid UTM & Metrik)
       const [showUtmZoneModal, setShowUtmZoneModal] = useState(false);
+      const [showBatchCoordModal, setShowBatchCoordModal] = useState(false);
+      const [batchCoordText, setBatchCoordText] = useState('');
+      const [batchCoordMode, setBatchCoordMode] = useState('replace'); // 'replace' or 'append'
 
       // Quick Paste Google Earth coordinates text
       const [quickPasteText, setQuickPasteText] = useState('');
@@ -2825,6 +2938,33 @@
       };
 
       // Handler for DMS input changes
+      // Handler for direct Timuran (Easting) & Utaraan (Northing) changes in table
+      const handleUtmChange = (id, field, val) => {
+        const numVal = parseFloat(val) || 0;
+        const basePI = piList[0] || geoAnchor;
+        const currentUtm = latLonToUtm(basePI.lat, basePI.lon);
+        const zoneNum = currentUtm.zoneNumber;
+        const hemi = currentUtm.hemisphere;
+
+        setPiList(piList.map(p => {
+          if (p.id === id) {
+            const pUtm = latLonToUtm(p.lat, p.lon);
+            const newEasting = field === 'easting' ? numVal : pUtm.easting;
+            const newNorthing = field === 'northing' ? numVal : pUtm.northing;
+            const geo = utmToLatLon(newEasting, newNorthing, zoneNum, hemi);
+            const xy = syncXYFromLatLon(geo.lat, geo.lon, basePI);
+            return {
+              ...p,
+              lat: geo.lat,
+              lon: geo.lon,
+              x: id === basePI.id ? p.x : xy.x,
+              y: id === basePI.id ? p.y : xy.y
+            };
+          }
+          return p;
+        }));
+      };
+
       const handleDmsChange = (id, field, part, value) => {
         const basePI = piList[0];
         setPiList(piList.map(p => {
@@ -2875,41 +3015,17 @@
       // Quick Paste Add from Google Earth coordinate string
       const handleQuickAdd = () => {
         if (!quickPasteText.trim()) return;
-        let lat = null, lon = null;
+        const basePI = piList[0] || geoAnchor;
+        const currentUtm = latLonToUtm(basePI.lat, basePI.lon);
 
-        // Try DMS pattern: e.g. 7° 28' 21.41" LS, 110° 13' 20.42" BT or 7°28'21.4"S 110°13'20.4"E
-        const dmsRegex = /(\d+)\s*°\s*(\d+)\s*['′]\s*([\d.]+)\s*["″]?\s*([NSEWLSBUtkKk]+)?/gi;
-        const matches = [...quickPasteText.matchAll(dmsRegex)];
-
-        if (matches.length >= 2) {
-          const conv = (m) => {
-            const d = parseFloat(m[1]) || 0;
-            const mi = parseFloat(m[2]) || 0;
-            const s = parseFloat(m[3]) || 0;
-            const h = (m[4] || '').toUpperCase();
-            let val = d + mi / 60 + s / 3600;
-            if (h.includes('S') || h.includes('LS') || h.includes('W') || h.includes('BB')) {
-              val = -val;
-            }
-            return parseFloat(val.toFixed(6));
-          };
-          lat = conv(matches[0]);
-          lon = conv(matches[1]);
-        } else {
-          // Decimal pattern: e.g. -7.472615, 110.222340
-          const parts = quickPasteText.replace(/[,;]/g, ' ').trim().split(/\s+/);
-          if (parts.length >= 2) {
-            lat = parseFloat(parts[0]);
-            lon = parseFloat(parts[1]);
-          }
-        }
-
-        if (lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
-          alert("Format koordinat tidak valid! Masukkan format Desimal (-7.472615, 110.222340) atau Derajat Menit Detik (7° 28' 21.41\" LS, 110° 13' 20.42\" BT)");
+        const parsed = parseAnyCoordinate(quickPasteText, currentUtm.zoneNumber, currentUtm.hemisphere);
+        if (!parsed || isNaN(parsed.lat) || isNaN(parsed.lon)) {
+          alert("Format koordinat tidak valid! Anda bisa langsung menempel:\n- Timuran & Utaraan: 414193.41, 9173928.91\n- Format Derajat: 7° 28' 21.41\" LS, 110° 13' 20.42\" BT\n- Format Desimal: -7.472615, 110.222340");
           return;
         }
 
-        const basePI = piList[0];
+        const lat = parsed.lat;
+        const lon = parsed.lon;
         const xy = syncXYFromLatLon(lat, lon, basePI);
         const last = piList[piList.length - 1];
         const newId = piList.length + 1;
@@ -2928,6 +3044,68 @@
         const updated = [...piList.slice(0, -1), newPoint, { ...last, id: newId + 1, name: `PI-${piList.length} (Akhir)` }];
         setPiList(updated);
         setQuickPasteText('');
+      };
+
+      // Handler for Batch Import Coordinates
+      const handleBatchImport = () => {
+        if (!batchCoordText.trim()) return;
+        const lines = batchCoordText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length < 2) {
+          alert("Harap masukkan minimal 2 baris koordinat (Titik Awal dan Titik Akhir)!");
+          return;
+        }
+
+        const basePI = piList[0] || geoAnchor;
+        const currentUtm = latLonToUtm(basePI.lat, basePI.lon);
+        const parsedPoints = [];
+
+        for (let i = 0; i < lines.length; i++) {
+          const res = parseAnyCoordinate(lines[i], currentUtm.zoneNumber, currentUtm.hemisphere);
+          if (res && !isNaN(res.lat) && !isNaN(res.lon)) {
+            parsedPoints.push(res);
+          }
+        }
+
+        if (parsedPoints.length < 2) {
+          alert("Gagal membaca koordinat! Pastikan setiap baris berisi angka Timuran & Utaraan yang valid.");
+          return;
+        }
+
+        const newPiList = parsedPoints.map((pt, idx) => {
+          const isFirst = idx === 0;
+          const isLast = idx === parsedPoints.length - 1;
+          const name = isFirst ? 'PI-0 (Awal)' : (isLast ? `PI-${idx} (Akhir)` : `PI-${idx}`);
+          const xy = syncXYFromLatLon(pt.lat, pt.lon, parsedPoints[0]);
+          return {
+            id: idx + 1,
+            name,
+            lat: pt.lat,
+            lon: pt.lon,
+            x: isFirst ? 1000 : 1000 + xy.x,
+            y: isFirst ? 1000 : 1000 + xy.y,
+            R: isFirst || isLast ? 0 : 300,
+            Ls: isFirst || isLast ? 0 : 50
+          };
+        });
+
+        if (batchCoordMode === 'append') {
+          const baseId = piList.length;
+          const appended = [
+            ...piList.slice(0, -1),
+            ...newPiList.slice(1)
+          ].map((p, i) => ({
+            ...p,
+            id: i + 1,
+            name: i === 0 ? 'PI-0 (Awal)' : (i === piList.length + newPiList.length - 2 ? `PI-${i} (Akhir)` : `PI-${i}`)
+          }));
+          setPiList(appended);
+        } else {
+          setPiList(newPiList);
+        }
+
+        setShowBatchCoordModal(false);
+        setBatchCoordText('');
+        alert(`Berhasil mengimpor ${parsedPoints.length} titik koordinat ke dalam trase!`);
       };
 
       // Handler for adding new PI point
@@ -3298,32 +3476,40 @@
                   </div>
 
                   {/* QUICK PASTE BAR FROM GOOGLE EARTH */}
-                  <div className="mb-4 p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center space-x-2.5 w-full sm:w-auto">
-                      <span className="font-bold text-emerald-950 dark:text-emerald-200 whitespace-nowrap flex items-center">
-                        <IconGlobe /> Tempel Koordinat Google Earth:
+                  <div className="mb-4 p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-slate-50 dark:from-slate-900 dark:via-emerald-950/30 dark:to-slate-900 border border-emerald-200 dark:border-emerald-900/60 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 text-xs shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3 w-full md:w-auto flex-grow">
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 whitespace-nowrap flex items-center gap-1.5">
+                        <span className="text-base">📋</span> Tempel Koordinat (Timuran &amp; Utaraan / DMS / Desimal):
                       </span>
                       <input
                         type="text"
                         value={quickPasteText}
                         onChange={(e) => setQuickPasteText(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') handleQuickAdd(); }}
-                        placeholder="Contoh: -7.472615, 110.222340"
-                        className="w-full sm:w-72 px-3 py-1.5 text-xs rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-emerald-500"
+                        placeholder="Tinggal tempel, contoh: 414193.41, 9173928.91 atau 7° 28' 21.41" LS, 110° 13' 20.42" BT"
+                        className="w-full sm:w-96 px-3 py-1.5 text-xs rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold focus:ring-2 focus:ring-emerald-500 shadow-inner"
                       />
                     </div>
-                    <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
+                    <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
                       <button
                         onClick={handleQuickAdd}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm transition whitespace-nowrap"
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition whitespace-nowrap flex items-center gap-1"
+                        title="Tambah 1 titik PI baru dari teks koordinat yang ditempel"
                       >
-                        + Tambah Titik dari Koordinat Ini
+                        <span>+</span> Tambah Titik Ini
+                      </button>
+                      <button
+                        onClick={() => setShowBatchCoordModal(true)}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm transition whitespace-nowrap flex items-center gap-1.5"
+                        title="Tempel banyak baris koordinat sekaligus dari Excel / Tabel Survei"
+                      >
+                        <span>📑</span> Tempel Banyak (Excel)
                       </button>
                       <a
                         href="https://earth.google.com/web/"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 font-semibold rounded-lg transition inline-flex items-center"
+                        className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:text-emerald-600 font-semibold rounded-xl transition inline-flex items-center gap-1"
                         title="Buka Google Earth Web"
                       >
                         Google Earth <IconExternal />
@@ -3433,11 +3619,11 @@
                         onClick={() => setCoordFormat('utm')}
                         className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1 ${
                           coordFormat === 'utm'
-                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
                             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                         }`}
                       >
-                        📐 Grid UTM
+                        📐 Timuran &amp; Utaraan (UTM)
                       </button>
                     </div>
                   </div>
@@ -3549,9 +3735,18 @@
                                         );
                                       })()
                                     ) : coordFormat === 'utm' ? (
-                                      <div className="font-mono text-xs font-bold text-indigo-700 dark:text-indigo-400">
-                                        {utmInfo.northing.toLocaleString('id-ID')} m N
-                                        <span className="block text-[10px] text-slate-400 font-normal">Grid UTM WGS-84</span>
+                                      <div>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          value={utmInfo.easting}
+                                          onChange={(e) => handleUtmChange(pi.id, 'easting', e.target.value)}
+                                          className="w-32 px-2 py-1 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 font-mono font-bold text-indigo-700 dark:text-indigo-300 focus:ring-2 focus:ring-indigo-500"
+                                          title="Koordinat Timuran (Easting X dalam meter) - Ubah atau tempel langsung di sini"
+                                        />
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono block mt-0.5">
+                                          {toDMS(pi.lon, false).text}
+                                        </span>
                                       </div>
                                     ) : (
                                       <div>
@@ -3619,9 +3814,18 @@
                                         );
                                       })()
                                     ) : coordFormat === 'utm' ? (
-                                      <div className="font-mono text-xs font-bold text-indigo-700 dark:text-indigo-400">
-                                        {utmInfo.easting.toLocaleString('id-ID')} m E
-                                        <span className="block text-[10px] text-slate-400 font-normal">CM: {utmInfo.centralMeridian}° BT</span>
+                                      <div>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          value={utmInfo.northing}
+                                          onChange={(e) => handleUtmChange(pi.id, 'northing', e.target.value)}
+                                          className="w-36 px-2 py-1 text-xs rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 font-mono font-bold text-indigo-700 dark:text-indigo-300 focus:ring-2 focus:ring-indigo-500"
+                                          title="Koordinat Utaraan (Northing Y dalam meter) - Ubah atau tempel langsung di sini"
+                                        />
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono block mt-0.5">
+                                          {toDMS(pi.lat, true).text}
+                                        </span>
                                       </div>
                                     ) : (
                                       <div>
@@ -5675,7 +5879,112 @@
           </main>
 
           {/* MODAL SARAN PAKAR (EXPERT SYSTEM POPUP) */}
-          {/* MODAL PEMBAGIAN ZONA UTM INDONESIA (WGS-84) */}
+          {/* MODAL TEMPEL BANYAK KOORDINAT SEKALIGUS (BATCH IMPORT DARI EXCEL) */}
+        {showBatchCoordModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+              
+              <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-xl">
+                    📑
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      Tempel Banyak Koordinat (Batch Import dari Excel)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Tinggal copy daftar koordinat Timuran &amp; Utaraan dari Excel dan tempel di bawah ini.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowBatchCoordModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* FORMAT GUIDANCE CARD */}
+              <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 mb-4 text-xs text-blue-900 dark:text-blue-200 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <span>💡</span> Cara Penggunaan (Bisa Semua Format):
+                </div>
+                <p>
+                  Salin 2 kolom koordinat dari Microsoft Excel atau Google Sheets, lalu langsung tempelkan di kotak teks di bawah. Sistem otomatis mendeteksi kolom <strong>Timuran (Easting / X)</strong> dan <strong>Utaraan (Northing / Y)</strong>.
+                </p>
+                <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl font-mono text-[11px] border border-blue-200 dark:border-blue-900 text-slate-700 dark:text-slate-300">
+                  414193.41, 9173928.91<br/>
+                  414750.20, 9174350.10<br/>
+                  415400.00, 9174020.50<br/>
+                  416050.30, 9174480.00
+                </div>
+              </div>
+
+              {/* TEXTAREA INPUT */}
+              <div className="space-y-2 mb-4">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Tempel Baris Koordinat di Sini:
+                </label>
+                <textarea
+                  rows="7"
+                  value={batchCoordText}
+                  onChange={(e) => setBatchCoordText(e.target.value)}
+                  placeholder="Tempel baris koordinat Timuran & Utaraan di sini (setiap baris = 1 titik PI)..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-xs focus:ring-2 focus:ring-indigo-500 shadow-inner"
+                ></textarea>
+              </div>
+
+              {/* IMPORT MODE TOGGLE */}
+              <div className="flex items-center space-x-4 mb-5 text-xs">
+                <span className="font-bold text-slate-700 dark:text-slate-300">Pilihan Terapkan:</span>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="batchMode"
+                    value="replace"
+                    checked={batchCoordMode === 'replace'}
+                    onChange={() => setBatchCoordMode('replace')}
+                    className="text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold">Ganti / Timpa Seluruh Trase (Mulai dari Awal)</span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="batchMode"
+                    value="append"
+                    checked={batchCoordMode === 'append'}
+                    onChange={() => setBatchCoordMode('append')}
+                    className="text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold">Tambahkan ke Akhir Trase</span>
+                </label>
+              </div>
+
+              {/* ACTIONS */}
+              <div className="flex items-center justify-end space-x-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => setShowBatchCoordModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleBatchImport}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs shadow-md transition flex items-center gap-1.5"
+                >
+                  <span>🚀</span> Terapkan Semua Koordinat
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* MODAL PEMBAGIAN ZONA UTM INDONESIA (WGS-84) */}
         {showUtmZoneModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
             <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
