@@ -1,55 +1,58 @@
-# SID-JALAN UNTIDAR | Sistem Informasi Desain Geometrik Jalan Raya
+# SID-JALAN UNTIDAR - Perencanaan Geometrik Jalan & Kanvas CAD Interaktif
 
-Aplikasi Web Interaktif (Kalkulator & Sistem Pakar) untuk Perencanaan Geometrik Jalan Raya berdasarkan standar **Pedoman Desain Geometrik Jalan (PDGJ 2021 Ditjen Bina Marga)** dan literatur akademik **"Dasar-Dasar Perencanaan Geometrik Jalan" (Silvia Sukirman)**.
+Aplikasi Web Interaktif Perencanaan Geometrik Jalan Terintegrasi berbasis Standar Bina Marga PDGJ 2021 dan Buku "Dasar-Dasar Perencanaan Geometrik Jalan" oleh Prof. Ir. Silvia Sukirman.
 
-Dikembangkan oleh **Kelompok 3 TS-04 - Jurusan Teknik Sipil, Fakultas Teknik, Universitas Tidar Magelang**.
-
----
-
-## 🌟 Fitur Utama
-
-1. **Header & Academic Branding**
-   - Logo resmi Universitas Tidar Magelang.
-   - Sakelar Light Mode & Dark Mode.
-   - Preset studi kasus (Trase Berbukit Vd=60 km/j & Trase Datar Vd=80 km/j).
-
-2. **Formulir Input Koordinat Dinamis (Google Earth WGS-84)**
-   - Mendukung input langsung **Latitude & Longitude** dari Google Earth (WGS-84).
-   - Penyelarasan otomatis ke koordinat metrik lokal $(X, Y)$ secara presisi.
-   - Fitur *Quick Paste* koordinat format `Lat, Lon` dari Google Earth.
-
-3. **Jendela Pratinjau Posisi Koordinat & Denah Trase (Live Satellite Preview Window)**
-   - Pratinjau langsung di atas foto satelit bumi resolusi tinggi (ESRI World Imagery).
-   - Klik langsung di peta satelit untuk menambahkan titik PI baru.
-   - Garis tangen dan lengkung jalan ter-update seketika (*real-time*).
-
-4. **Hasil Perhitungan Stationing (STA) Kontinu**
-   - Perhitungan stasioning resmi sepanjang sumbu jalan (STA PI, STA TS, STA SC, STA CS, STA ST).
-   - Tabel Rangkuman Stationing Titik-Titik Kritis Trase Jalan.
-
-5. **Sistem Rekomendasi Parameter (💡 Saran Pakar & Pros-Cons)**
-   - Analisis $R_{min}$ matematis vs $R$ rekomendasi di lapangan.
-   - Evaluasi panjang peralihan ($L_s$) berdasarkan 3 kriteria (Modifikasi Shortt, Kelandaian Relatif, dan Waktu Tempuh 3 Detik).
-   - Rekomendasi bentuk tikungan (Full Circle vs Spiral-Circle-Spiral vs Spiral-Spiral).
-   - Peringatan keamanan alinyemen vertikal ($L_v$ vs Waktu Tempuh 3 Detik dan Jarak Pandang Henti JPH).
-
-6. **Explainable Engine & Landasan Teori**
-   - Accordion rumus matematis lengkap dan narasi acuan standar Bina Marga.
-
-7. **Visualisasi Grafik Profil 2D & Export Multi-Format**
-   - Profil Memanjang (Longitudinal Profile Canvas) dengan arsiran Galian (*Cut*) & Timbunan (*Fill*).
-   - Export file **Excel / CSV**.
-   - Export file **KML 3D** untuk dibuka langsung di **Google Earth Pro & Google Earth Web**.
+Dikembangkan oleh **Kintan Alifia Astari & Kelompok 3 TS-04** - Jurusan Teknik Sipil, Fakultas Teknik, **Universitas Tidar (UNTIDAR)** Magelang.
 
 ---
 
-## 🚀 Deployment ke Vercel
+## Fitur Utama
 
-Proyek ini telah dikonfigurasi dengan `vercel.json` dan otomatis terhubung ke repositori GitHub `kintan8/GEOMETRI-JALAN-KELOMPOK-3-TS-04`.
-Setiap pembaruan kode melalui Antigravity akan otomatis ter-push ke GitHub dan di-deploy langsung secara live oleh Vercel.
+1. **Parameter Desain & Koordinat Trase WGS-84**
+   - Pemilihan klasifikasi medan (Datar, Perbukitan, Pegunungan).
+   - Input koordinat GPS Google Earth (WGS-84 Lat/Lon) dengan fitur Quick Paste.
+   - Peta Pratinjau Interaktif Leaflet dengan citra satelit resolusi tinggi ESRI World Imagery.
+   - Perhitungan otomatis jarak antar-PI, azimut sudut kompas, dan sudut defleksi tikungan.
+
+2. **Analisis Alinyemen Horizontal (Bina Marga PDGJ 2021 & Silvia Sukirman)**
+   - Klasifikasi otomatis jenis tikungan:
+     - **Full Circle (F-C)**
+     - **Spiral - Circle - Spiral (S-C-S)**
+     - **Spiral - Spiral (S-S)**
+   - Perhitungan superelevasi desain ($e$), panjang peralihan ($L_s$), pergeseran busur ($p$), absis ($k$), tangen ($T_s / T_c$), jarak eksternal ($E_s / E_c$), dan panjang total tikungan ($L_{tot}$).
+   - Evaluasi kelayakan teknis: pencegahan overlap tikungan dan waktu tempuh minimal pada busur lingkaran ($L_c \ge 25$ m).
+
+3. **Kanvas CAD Interaktif (AutoCAD Style Drawing)**
+   - **Mode Lengkung Lengkap**: Mendukung semua jenis tikungan (F-C, S-C-S, dan S-S).
+   - **Visualisasi Gambar Kerja Standar**: Batas kertas gambar (A4, A3, OFF), margin teknis, dan Kop Etiket resmi Universitas Tidar.
+   - **Anotasi Dimensi Teknik**: Dimensi otomatis untuk $T_s / T_c$, $E_s / E_c$, $L_s$, $L_c$, $R$, $\Delta$, $\theta_s$, $p$, dan $k$.
+   - **Kontrol Layer CAD (ON/OFF)**:
+     - `GARIS_UTAMA` (Tangen, Busur Lengkung, Spiral)
+     - `GARIS_SUMBU` (Sumbu Jalan, Sumbu Bagi PI-O)
+     - `GARIS_POTONG` (Garis Jari-jari Radial ke Pusat O)
+     - `DIMENSI_NOTASI` (Ukuran dan Notasi Teknik)
+     - `TITIK_KONTROL` (PI, TC, CT, TS, SC, CS, ST, O)
+     - `KOP_ETIKET` (Garis Kertas, Judul Gambar, Skala Grafis, Arah Utara)
+   - **Detail Notasi Interaktif**: Klik elemen garis atau dimensi pada kanvas untuk memunculkan detail parameter, rumus matematis, serta penjelasan teknis dan standar Bina Marga.
+   - **Ekspor Vektor & Raster**:
+     - **Unduh DXF**: Format standar ASCII DXF yang dapat dibuka langsung di AutoCAD, Civil 3D, atau LibreCAD.
+     - **Unduh PNG**: Raster resolusi tinggi siap cetak.
+   - **Workspace OpenCAD Studio**: Drawer parametrik live untuk menyetel $R$, $\Delta$, $L_s$, dan $V_d$ secara bebas dengan pembaruan kanvas seketika.
+
+4. **Alinyemen Vertikal & Profil Memanjang 2D**
+   - Lengkung vertikal cembung (crest) dan cekung (sag).
+   - Diagram profil memanjang 2D dengan arsiran galian (cut) dan timbunan (fill) serta estimasi volume tanah.
+
+5. **Visualisasi 3D & Google Earth Export**
+   - Ekspor trase jalan ke format 3D KML untuk visualisasi langsung di Google Earth Desktop & Web.
+   - Ekspor rekapitulasi stasioning dan koordinat ke CSV/Excel.
 
 ---
 
-## 📚 Landasan Standar & Referensi
-- **PDGJ 2021**: Pedoman Desain Geometrik Jalan No. 13/P/BM/2021, Direktorat Jenderal Bina Marga, Kementerian Pekerjaan Umum dan Perumahan Rakyat.
-- **Silvia Sukirman (1999)**: *Dasar-Dasar Perencanaan Geometrik Jalan*, Penerbit Nova, Bandung.
+## Deploy & Akses Live
+
+Aplikasi ini dideploy secara otomatis di Vercel:
+👉 **[https://sid-jalan-untidar.vercel.app](https://sid-jalan-untidar.vercel.app)**
+
+Repository GitHub:
+👉 **[https://github.com/kintan8/GEOMETRI-JALAN-KELOMPOK-3-TS-04](https://github.com/kintan8/GEOMETRI-JALAN-KELOMPOK-3-TS-04)**
