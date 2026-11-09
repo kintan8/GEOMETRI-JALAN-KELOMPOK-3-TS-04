@@ -293,6 +293,38 @@
       const [piList, setPiList] = useState(PRESET_PEGUNUNGAN.piList);
       const [pviList, setPviList] = useState(PRESET_PEGUNUNGAN.pviList);
 
+      // --- KANVAS CAD INTERAKTIF STATE ---
+      const [cadCurveType, setCadCurveType] = useState('FC'); // 'FC', 'SCS', 'SS'
+      const [cadParams, setCadParams] = useState({
+        R: 1999,
+        delta: 11.5,
+        Ls: 60,
+        Vd: 60,
+        name: "Detail Tikungan (F-C)"
+      });
+      const [cadScale, setCadScale] = useState(5000);
+      const [paperSize, setPaperSize] = useState('A4'); // 'A4', 'A3', 'OFF'
+      const [cadLayers, setCadLayers] = useState({
+        GARIS_UTAMA: true,
+        GARIS_SUMBU: true,
+        GARIS_POTONG: true,
+        DIMENSI_NOTASI: true,
+        TITIK_KONTROL: true,
+        KOP_ETIKET: true
+      });
+      const [selectedEntity, setSelectedEntity] = useState(null);
+      const [showCadStudio, setShowCadStudio] = useState(false);
+      const [cadPan, setCadPan] = useState({ x: 0, y: 0 });
+      const [cadZoom, setCadZoom] = useState(1.0);
+      const [cursorCadCoords, setCursorCadCoords] = useState({ x: 519.08, y: 7.19 });
+      const [cadIsFullscreen, setCadIsFullscreen] = useState(false);
+      const cadCanvasRef = useRef(null);
+      const cadContainerRef = useRef(null);
+      const isDraggingCad = useRef(false);
+      const dragStartPos = useRef({ x: 0, y: 0 });
+      const lastPanPos = useRef({ x: 0, y: 0 });
+      const cadHitEntitiesRef = useRef([]);
+
       // Modal Expert Advice
       const [showExpertModal, setShowExpertModal] = useState(false);
 
@@ -311,6 +343,848 @@
       }, [darkMode]);
 
       // --- CALCULATIONS ENGINE BASED ON PDGJ 2021 & SILVIA SUKIRMAN ---
+
+      // --- CAD INTERACTIVE ENGINE HELPERS ---
+      const openPiInCad = (piItem) => {
+        let ct = 'FC';
+        if (piItem.curveType && piItem.curveType.includes('S-C-S')) ct = 'SCS';
+        else if (piItem.curveType && piItem.curveType.includes('S-S')) ct = 'SS';
+        else if (piItem.curveType && piItem.curveType.includes('F-C')) ct = 'FC';
+
+        setCadCurveType(ct);
+        setCadParams({
+          R: piItem.R || 1000,
+          delta: piItem.deltaDeg || 11.5,
+          Ls: piItem.Ls || 60,
+          Vd: Vd || 60,
+          name: `${piItem.piName || 'PI'} (${ct})`
+        });
+        setSelectedEntity(null);
+        setCadPan({ x: 0, y: 0 });
+        setCadZoom(1.0);
+        setActiveTab('cad');
+      };
+
+      // Computed CAD Geometry for the active curve
+      const cadGeom = useMemo(() => {
+        const R = Math.max(50, parseFloat(cadParams.R) || 1000);
+        const deltaDeg = Math.max(0.5, Math.min(179, parseFloat(cadParams.delta) || 11.5));
+        const deltaRad = (deltaDeg * Math.PI) / 180;
+        const alpha = deltaRad / 2;
+        const Ls_in = Math.max(10, parseFloat(cadParams.Ls) || 60);
+
+        if (cadCurveType === 'FC') {
+          const Tc = R * Math.tan(alpha);
+          const Ec = R * (1 / Math.cos(alpha) - 1);
+          const Lc = R * deltaRad;
+          return {
+            type: 'FC',
+            typeName: 'Full Circle (F-C)',
+            R,
+            deltaDeg,
+            deltaRad,
+            alpha,
+            Tc,
+            Ts: Tc,
+            Ec,
+            Es: Ec,
+            Lc,
+            Ltot: Lc,
+            Ls: 0,
+            thetaS_deg: 0,
+            deltaC_deg: deltaDeg,
+            p: 0,
+            k: 0
+          };
+        } else if (cadCurveType === 'SCS') {
+          const Ls = Ls_in;
+          const thetaS_rad = Ls / (2 * R);
+          const thetaS_deg = (thetaS_rad * 180) / Math.PI;
+          const deltaC_deg = Math.max(0, deltaDeg - 2 * thetaS_deg);
+          const deltaC_rad = (deltaC_deg * Math.PI) / 180;
+          const Lc = R * deltaC_rad;
+          const p = (Ls * Ls) / (24 * R);
+          const k = Ls - Math.pow(Ls, 3) / (40 * R * R);
+          const Ts = (R + p) * Math.tan(alpha) + k;
+          const Es = (R + p) / Math.cos(alpha) - R;
+          const Ltot = Lc + 2 * Ls;
+          return {
+            type: 'SCS',
+            typeName: 'Spiral-Circle-Spiral (S-C-S)',
+            R,
+            deltaDeg,
+            deltaRad,
+            alpha,
+            Tc: Ts,
+            Ts,
+            Ec: Es,
+            Es,
+            Lc,
+            Ls,
+            Ltot,
+            thetaS_deg: thetaS_deg,
+            deltaC_deg: deltaC_deg,
+            p,
+            k
+          };
+        } else {
+          // Spiral-Spiral (S-S)
+          const thetaS_rad = alpha;
+          const thetaS_deg = deltaDeg / 2;
+          const Ls = 2 * R * thetaS_rad;
+          const p = (Ls * Ls) / (24 * R);
+          const k = Ls - Math.pow(Ls, 3) / (40 * R * R);
+          const Ts = (R + p) * Math.tan(alpha) + k;
+          const Es = (R + p) / Math.cos(alpha) - R;
+          const Ltot = 2 * Ls;
+          return {
+            type: 'SS',
+            typeName: 'Spiral-Spiral (S-S)',
+            R,
+            deltaDeg,
+            deltaRad,
+            alpha,
+            Tc: Ts,
+            Ts,
+            Ec: Es,
+            Es,
+            Lc: 0,
+            Ls,
+            Ltot,
+            thetaS_deg: thetaS_deg,
+            deltaC_deg: 0,
+            p,
+            k
+          };
+        }
+      }, [cadCurveType, cadParams]);
+
+      // --- KANVAS CAD RENDERING HOOK ---
+      useEffect(() => {
+        const canvas = cadCanvasRef.current;
+        if (!canvas || activeTab !== 'cad') return;
+
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+
+        const ctx = canvas.getContext('2d');
+        ctx.resetTransform();
+        ctx.scale(dpr, dpr);
+
+        const w = rect.width;
+        const h = rect.height;
+
+        // Reset hit entities
+        cadHitEntitiesRef.current = [];
+
+        // 1. Draw Paper Sheet Background & Margins
+        if (paperSize !== 'OFF') {
+          // Canvas backdrop
+          ctx.fillStyle = darkMode ? '#0f172a' : '#f1f5f9';
+          ctx.fillRect(0, 0, w, h);
+
+          // Paper Sheet (A4 / A3 portrait or landscape)
+          const paperMargin = 16;
+          const pw = w - paperMargin * 2;
+          const ph = h - paperMargin * 2;
+          const px = paperMargin;
+          const py = paperMargin;
+
+          // Drop shadow
+          ctx.shadowColor = darkMode ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.12)';
+          ctx.shadowBlur = 12;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 4;
+
+          // Paper White Sheet
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(px, py, pw, ph);
+          ctx.shadowColor = 'transparent';
+
+          // Outer border
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(px, py, pw, ph);
+
+          // Inner drafting margin
+          ctx.strokeStyle = '#334155';
+          ctx.lineWidth = 0.8;
+          ctx.strokeRect(px + 8, py + 8, pw - 16, ph - 16);
+
+          // Kop Etiket / Title Block (Bottom Right)
+          if (cadLayers.KOP_ETIKET) {
+            const kbW = Math.min(260, pw * 0.45);
+            const kbH = 68;
+            const kbX = px + pw - 8 - kbW;
+            const kbY = py + ph - 8 - kbH;
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(kbX, kbY, kbW, kbH);
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(kbX, kbY, kbW, kbH);
+
+            // Inner divider lines
+            ctx.beginPath();
+            ctx.moveTo(kbX, kbY + 22);
+            ctx.lineTo(kbX + kbW, kbY + 22);
+            ctx.moveTo(kbX, kbY + 44);
+            ctx.lineTo(kbX + kbW, kbY + 44);
+            ctx.moveTo(kbX + kbW * 0.58, kbY + 44);
+            ctx.lineTo(kbX + kbW * 0.58, kbY + kbH);
+            ctx.stroke();
+
+            // Text in Kop
+            ctx.fillStyle = '#0f172a';
+            ctx.font = 'bold 9px "Plus Jakarta Sans", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('UNIVERSITAS TIDAR - TEKNIK SIPIL', kbX + 6, kbY + 14);
+
+            ctx.font = 'bold 10px "Plus Jakarta Sans", sans-serif';
+            ctx.fillText(`DETAIL TIKUNGAN (${cadCurveType === 'FC' ? 'F-C' : cadCurveType === 'SCS' ? 'S-C-S' : 'S-S'})`, kbX + 6, kbY + 36);
+
+            ctx.font = '8px "JetBrains Mono", monospace';
+            ctx.fillText(`SKALA 1 : ${cadScale}`, kbX + 6, kbY + 58);
+            ctx.fillText(`KLMPK 3 TS-04`, kbX + kbW * 0.62, kbY + 58);
+          }
+        } else {
+          // Paper OFF: Clean infinite CAD workspace
+          ctx.fillStyle = darkMode ? '#090d16' : '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+
+          // Subtle dot grid
+          ctx.fillStyle = darkMode ? '#1e293b' : '#e2e8f0';
+          const gridStep = 30;
+          for (let gx = 0; gx < w; gx += gridStep) {
+            for (let gy = 0; gy < h; gy += gridStep) {
+              ctx.fillRect(gx, gy, 1.5, 1.5);
+            }
+          }
+        }
+
+        // 2. CAD Coordinate Transformations & Math
+        const origX = w / 2 + cadPan.x;
+        const origY = h * 0.32 + cadPan.y;
+        const baseScale = (w / 1400) * (5000 / cadScale) * cadZoom;
+
+        const toScr = (wx, wy) => ({
+          x: origX + wx * baseScale,
+          y: origY - wy * baseScale
+        });
+
+        const toWld = (sx, sy) => ({
+          x: (sx - origX) / baseScale,
+          y: (origY - sy) / baseScale
+        });
+
+        // Geometry parameters
+        const g = cadGeom;
+        const R = g.R;
+        const deltaDeg = g.deltaDeg;
+        const alpha = g.alpha; // half delta
+        const sinA = Math.sin(alpha);
+        const cosA = Math.cos(alpha);
+
+        let T = g.Tc;
+        let E = g.Ec;
+        let O_y = -R / cosA;
+        let TC_pt, CT_pt, Pin_pt, Pout_pt, SC_pt, CS_pt, SS_pt;
+
+        // Tangent extension beyond TC/CT for standard CAD appearance
+        const Lext = T * 0.32;
+
+        if (cadCurveType === 'FC') {
+          TC_pt = { x: -T * cosA, y: -T * sinA };
+          CT_pt = { x: T * cosA, y: -T * sinA };
+          Pin_pt = { x: -(T + Lext) * cosA, y: -(T + Lext) * sinA };
+          Pout_pt = { x: (T + Lext) * cosA, y: -(T + Lext) * sinA };
+        } else if (cadCurveType === 'SCS') {
+          T = g.Ts;
+          E = g.Es;
+          const p = g.p;
+          O_y = -(R + p) / cosA;
+          const thS = (g.thetaS_deg * Math.PI) / 180;
+
+          TC_pt = { x: -T * cosA, y: -T * sinA }; // TS
+          CT_pt = { x: T * cosA, y: -T * sinA }; // ST
+          Pin_pt = { x: -(T + Lext) * cosA, y: -(T + Lext) * sinA };
+          Pout_pt = { x: (T + Lext) * cosA, y: -(T + Lext) * sinA };
+
+          // SC and CS on shifted circle
+          SC_pt = { x: -R * Math.sin(alpha - thS), y: O_y + R * Math.cos(alpha - thS) };
+          CS_pt = { x: R * Math.sin(alpha - thS), y: O_y + R * Math.cos(alpha - thS) };
+        } else {
+          // SS
+          T = g.Ts;
+          E = g.Es;
+          const p = g.p;
+          O_y = -(R + p) / cosA;
+
+          TC_pt = { x: -T * cosA, y: -T * sinA }; // TS
+          CT_pt = { x: T * cosA, y: -T * sinA }; // ST
+          Pin_pt = { x: -(T + Lext) * cosA, y: -(T + Lext) * sinA };
+          Pout_pt = { x: (T + Lext) * cosA, y: -(T + Lext) * sinA };
+          SS_pt = { x: 0, y: -E };
+        }
+
+        const O_pt = { x: 0, y: O_y };
+        const PI_pt = { x: 0, y: 0 };
+        const Apex_pt = { x: 0, y: -E };
+
+        // Convert key points to screen
+        const scrPI = toScr(PI_pt.x, PI_pt.y);
+        const scrTC = toScr(TC_pt.x, TC_pt.y);
+        const scrCT = toScr(CT_pt.x, CT_pt.y);
+        const scrPin = toScr(Pin_pt.x, Pin_pt.y);
+        const scrPout = toScr(Pout_pt.x, Pout_pt.y);
+        const scrO = toScr(O_pt.x, O_pt.y);
+        const scrApex = toScr(Apex_pt.x, Apex_pt.y);
+
+        // Helper: distance point to line segment
+        const distToSegment = (px, py, x1, y1, x2, y2) => {
+          const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+          if (l2 === 0) return Math.hypot(px - x1, py - y1);
+          let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+          t = Math.max(0, Math.min(1, t));
+          return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+        };
+
+        // 3. LAYER: GARIS_SUMBU (Centerline Axis Dash-Dot)
+        if (cadLayers.GARIS_SUMBU) {
+          ctx.save();
+          ctx.strokeStyle = '#475569';
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([14, 4, 3, 4]); // Dash-dot pattern
+
+          // Vertical centerline through PI and O
+          const scrAxisTop = toScr(0, 40);
+          const scrAxisBottom = toScr(0, O_y - 40);
+          ctx.beginPath();
+          ctx.moveTo(scrAxisTop.x, scrAxisTop.y);
+          ctx.lineTo(scrAxisBottom.x, scrAxisBottom.y);
+          ctx.stroke();
+          ctx.restore();
+
+          cadHitEntitiesRef.current.push({
+            id: 'sumbu_utama',
+            name: 'Garis Sumbu Bagi (Centerline Axis)',
+            layer: 'GARIS_SUMBU',
+            value: `Panjang Axis = ${(Math.abs(O_y) + 80).toFixed(2)} m`,
+            formula: 'Garis Bagi Sudut PI (Bisector)',
+            desc: 'Sumbu simetri geometrik tikungan yang menghubungkan titik perpotongan (PI) dengan titik pusat kelengkungan lingkaran (O).',
+            standard: 'PDGJ 2021 & Prof. Silvia Sukirman',
+            hitDist: (sx, sy) => distToSegment(sx, sy, scrAxisTop.x, scrAxisTop.y, scrAxisBottom.x, scrAxisBottom.y)
+          });
+        }
+
+        // 4. LAYER: GARIS_POTONG (Radial Dashed Lines to O)
+        if (cadLayers.GARIS_POTONG) {
+          ctx.save();
+          ctx.strokeStyle = '#64748b';
+          ctx.lineWidth = 1.0;
+          ctx.setLineDash([6, 4]); // Dashed line
+
+          // Left radial line to TC / SC
+          const scrRadLeftTarget = cadCurveType === 'SCS' ? toScr(SC_pt.x, SC_pt.y) : scrTC;
+          ctx.beginPath();
+          ctx.moveTo(scrO.x, scrO.y);
+          ctx.lineTo(scrRadLeftTarget.x, scrRadLeftTarget.y);
+          ctx.stroke();
+
+          // Right radial line to CT / CS
+          const scrRadRightTarget = cadCurveType === 'SCS' ? toScr(CS_pt.x, CS_pt.y) : scrCT;
+          ctx.beginPath();
+          ctx.moveTo(scrO.x, scrO.y);
+          ctx.lineTo(scrRadRightTarget.x, scrRadRightTarget.y);
+          ctx.stroke();
+
+          // Horizontal centerline at O
+          const scrOHorizL = toScr(-R * 0.25, O_y);
+          const scrOHorizR = toScr(R * 0.25, O_y);
+          ctx.beginPath();
+          ctx.moveTo(scrOHorizL.x, scrOHorizL.y);
+          ctx.lineTo(scrOHorizR.x, scrOHorizR.y);
+          ctx.stroke();
+          ctx.restore();
+
+          cadHitEntitiesRef.current.push({
+            id: 'garis_radial_R',
+            name: 'Garis Jari-Jari Radial (R)',
+            layer: 'GARIS_POTONG',
+            value: `R = ${R.toFixed(2)} meter`,
+            formula: 'Rmin = Vd² / (127 × (emax + fmax))',
+            desc: 'Garis radial penentu titik pusat kelengkungan busur lingkaran. Titik potong radial dengan tangen membentuk sudut siku-siku 90° tepat di titik TC / CT.',
+            standard: 'PDGJ 2021 & Prof. Silvia Sukirman',
+            hitDist: (sx, sy) => Math.min(
+              distToSegment(sx, sy, scrO.x, scrO.y, scrRadLeftTarget.x, scrRadLeftTarget.y),
+              distToSegment(sx, sy, scrO.x, scrO.y, scrRadRightTarget.x, scrRadRightTarget.y)
+            )
+          });
+        }
+
+        // 5. LAYER: GARIS_UTAMA (Tangents, Circular Arc, Transition Spirals)
+        if (cadLayers.GARIS_UTAMA) {
+          ctx.save();
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 2.4;
+          ctx.setLineDash([]); // Solid CAD line
+
+          // Tangents
+          ctx.beginPath();
+          ctx.moveTo(scrPin.x, scrPin.y);
+          ctx.lineTo(scrPI.x, scrPI.y);
+          ctx.lineTo(scrPout.x, scrPout.y);
+          ctx.stroke();
+
+          // Register Tangent Hit Entity
+          cadHitEntitiesRef.current.push({
+            id: 'tangen_utama',
+            name: cadCurveType === 'FC' ? 'Tangen Luar (Tc)' : 'Tangen Luar (Ts)',
+            layer: 'GARIS_UTAMA',
+            value: `${T.toFixed(2)} meter`,
+            formula: cadCurveType === 'FC' ? 'Tc = R × tan(Δ / 2)' : 'Ts = (R + p) tan(Δ / 2) + k',
+            desc: 'Jarak dari Titik Perpotongan (PI) ke titik awal/akhir tikungan (TC/TS). Menurut pedoman PDGJ 2021 dan Prof. Silvia Sukirman, nilai Ts tidak boleh melebihi setengah panjang tangen antar-PI guna mencegah risiko tumpang tindih (overlapping) tikungan.',
+            standard: 'Bina Marga PDGJ 2021 & Prof. Silvia Sukirman',
+            hitDist: (sx, sy) => Math.min(
+              distToSegment(sx, sy, scrPin.x, scrPin.y, scrPI.x, scrPI.y),
+              distToSegment(sx, sy, scrPI.x, scrPI.y, scrPout.x, scrPout.y)
+            )
+          });
+
+          // Curve Arcs & Spirals
+          if (cadCurveType === 'FC') {
+            // Full Circle arc from TC to CT
+            const startAngle = Math.PI / 2 + alpha;
+            const endAngle = Math.PI / 2 - alpha;
+
+            // In screen coordinates: Y is inverted
+            ctx.beginPath();
+            ctx.arc(scrO.x, scrO.y, R * baseScale, -startAngle, -endAngle, false);
+            ctx.stroke();
+
+            cadHitEntitiesRef.current.push({
+              id: 'lengkung_lingkaran_fc',
+              name: 'Busur Lingkaran Penuh (Lc)',
+              layer: 'GARIS_UTAMA',
+              value: `${g.Lc.toFixed(2)} meter`,
+              formula: 'Lc = (Δ × π × R) / 180',
+              desc: 'Panjang busur lingkaran murni tikungan Full Circle di mana kemiringan melintang jalan (superelevasi normal/e) dipertahankan stabil di sepanjang lengkung.',
+              standard: 'PDGJ 2021 & Prof. Silvia Sukirman',
+              hitDist: (sx, sy) => {
+                const distFromO = Math.hypot(sx - scrO.x, sy - scrO.y);
+                return Math.abs(distFromO - R * baseScale);
+              }
+            });
+          } else if (cadCurveType === 'SCS') {
+            // Spiral Entry (TS -> SC)
+            const thS = (g.thetaS_deg * Math.PI) / 180;
+            const steps = 24;
+
+            ctx.beginPath();
+            ctx.moveTo(scrTC.x, scrTC.y);
+            for (let i = 1; i <= steps; i++) {
+              const u = i / steps; // 0 to 1
+              const l = u * g.Ls;
+              // Local spiral coordinates (Euler clothoid approximation)
+              const xl = l - Math.pow(l, 5) / (40 * R * R * g.Ls * g.Ls);
+              const yl = Math.pow(l, 3) / (6 * R * g.Ls);
+              // Transform to world along incoming tangent:
+              // Origin is TC, tangent direction is (cosA, sinA)
+              const wx = TC_pt.x + xl * cosA - yl * sinA;
+              const wy = TC_pt.y + xl * sinA + yl * cosA;
+              const sp = toScr(wx, wy);
+              ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+
+            // Circular Arc (SC -> CS)
+            const scrSC = toScr(SC_pt.x, SC_pt.y);
+            const scrCS = toScr(CS_pt.x, CS_pt.y);
+            const scAngle = Math.PI / 2 + alpha - thS;
+            const csAngle = Math.PI / 2 - alpha + thS;
+
+            ctx.beginPath();
+            ctx.arc(scrO.x, scrO.y, R * baseScale, -scAngle, -csAngle, false);
+            ctx.stroke();
+
+            // Spiral Exit (CS -> ST)
+            ctx.beginPath();
+            ctx.moveTo(scrCS.x, scrCS.y);
+            for (let i = steps - 1; i >= 0; i--) {
+              const u = i / steps;
+              const l = (1 - u) * g.Ls;
+              const xl = l - Math.pow(l, 5) / (40 * R * R * g.Ls * g.Ls);
+              const yl = Math.pow(l, 3) / (6 * R * g.Ls);
+              // Along outgoing tangent backwards from CT
+              const wx = CT_pt.x - xl * cosA - yl * sinA;
+              const wy = CT_pt.y + xl * sinA - yl * cosA;
+              const sp = toScr(wx, wy);
+              ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.lineTo(scrCT.x, scrCT.y);
+            ctx.stroke();
+
+            // Register hit entities for SCS
+            cadHitEntitiesRef.current.push({
+              id: 'lengkung_busur_scs',
+              name: 'Busur Lingkaran S-C-S (Lc)',
+              layer: 'GARIS_UTAMA',
+              value: `${g.Lc.toFixed(2)} meter`,
+              formula: 'Lc = (Δc × π × R) / 180',
+              desc: 'Panjang busur lingkaran murni di mana superelevasi maksimum dipertahankan penuh. Sesuai standar PDGJ 2021, Lc disyaratkan minimal 25 meter atau ditempuh ≥ 1.5 detik pada kecepatan rencana.',
+              standard: 'Bina Marga PDGJ 2021',
+              hitDist: (sx, sy) => Math.abs(Math.hypot(sx - scrO.x, sy - scrO.y) - R * baseScale)
+            });
+
+            cadHitEntitiesRef.current.push({
+              id: 'spiral_scs',
+              name: 'Lengkung Peralihan Spiral (Ls)',
+              layer: 'GARIS_UTAMA',
+              value: `${g.Ls.toFixed(2)} meter`,
+              formula: 'Ls = max(Ls_modifikasi, Ls_waktu, Ls_superelevasi)',
+              desc: 'Lengkung transisi bertingkat dengan kelengkungan linear dari R=∞ di TS ke R di SC. Berfungsi mengalirkan gaya sentrifugal secara bertahap dan menyediakan area pencapaian kemiringan (superelevasi runoff).',
+              standard: 'Prof. Silvia Sukirman & PDGJ 2021',
+              hitDist: (sx, sy) => Math.min(
+                distToSegment(sx, sy, scrTC.x, scrTC.y, scrSC.x, scrSC.y),
+                distToSegment(sx, sy, scrCS.x, scrCS.y, scrCT.x, scrCT.y)
+              )
+            });
+          } else {
+            // Spiral-Spiral (S-S)
+            const scrSS = toScr(SS_pt.x, SS_pt.y);
+            const steps = 30;
+
+            // Spiral 1: TS -> SS
+            ctx.beginPath();
+            ctx.moveTo(scrTC.x, scrTC.y);
+            for (let i = 1; i <= steps; i++) {
+              const u = i / steps;
+              const l = u * g.Ls;
+              const xl = l - Math.pow(l, 5) / (40 * R * R * g.Ls * g.Ls);
+              const yl = Math.pow(l, 3) / (6 * R * g.Ls);
+              const wx = TC_pt.x + xl * cosA - yl * sinA;
+              const wy = TC_pt.y + xl * sinA + yl * cosA;
+              const sp = toScr(wx, wy);
+              ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+
+            // Spiral 2: SS -> ST
+            ctx.beginPath();
+            ctx.moveTo(scrSS.x, scrSS.y);
+            for (let i = steps - 1; i >= 0; i--) {
+              const u = i / steps;
+              const l = (1 - u) * g.Ls;
+              const xl = l - Math.pow(l, 5) / (40 * R * R * g.Ls * g.Ls);
+              const yl = Math.pow(l, 3) / (6 * R * g.Ls);
+              const wx = CT_pt.x - xl * cosA - yl * sinA;
+              const wy = CT_pt.y + xl * sinA - yl * cosA;
+              const sp = toScr(wx, wy);
+              ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.lineTo(scrCT.x, scrCT.y);
+            ctx.stroke();
+
+            cadHitEntitiesRef.current.push({
+              id: 'spiral_ss',
+              name: 'Lengkung Spiral-Spiral Penuh (Ltot = 2×Ls)',
+              layer: 'GARIS_UTAMA',
+              value: `Ltot = ${g.Ltot.toFixed(2)} meter (Ls = ${g.Ls.toFixed(2)} m)`,
+              formula: 'θs = Δ / 2 | Lc = 0 | Ls = (Δ × π × R) / 180',
+              desc: 'Tikungan khusus Spiral-Spiral di mana busur lingkaran habis (Lc = 0). Dua spiral bertemu langsung di puncak SS. Digunakan pada medan perbukitan/pegunungan dengan sudut belokan kecil atau ruang terbatas.',
+              standard: 'PDGJ 2021 & Prof. Silvia Sukirman',
+              hitDist: (sx, sy) => Math.min(
+                distToSegment(sx, sy, scrTC.x, scrTC.y, scrSS.x, scrSS.y),
+                distToSegment(sx, sy, scrSS.x, scrSS.y, scrCT.x, scrCT.y)
+              )
+            });
+          }
+          ctx.restore();
+        }
+
+        // 6. LAYER: DIMENSI_NOTASI (Engineering Dimension Lines & Labels)
+        if (cadLayers.DIMENSI_NOTASI) {
+          ctx.save();
+          ctx.strokeStyle = '#0f172a';
+          ctx.fillStyle = '#0f172a';
+          ctx.lineWidth = 1.0;
+          ctx.font = 'bold 9px "Plus Jakarta Sans", sans-serif';
+
+          // Helper: Draw dimension arrow / tick
+          const drawDimLine = (x1, y1, x2, y2, labelText) => {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            // Slashes at ends
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const tickL = 5;
+            ctx.beginPath();
+            ctx.moveTo(x1 - tickL * Math.cos(angle + Math.PI / 4), y1 - tickL * Math.sin(angle + Math.PI / 4));
+            ctx.lineTo(x1 + tickL * Math.cos(angle + Math.PI / 4), y1 + tickL * Math.sin(angle + Math.PI / 4));
+            ctx.moveTo(x2 - tickL * Math.cos(angle + Math.PI / 4), y2 - tickL * Math.sin(angle + Math.PI / 4));
+            ctx.lineTo(x2 + tickL * Math.cos(angle + Math.PI / 4), y2 + tickL * Math.sin(angle + Math.PI / 4));
+            ctx.stroke();
+
+            // Centered text
+            const mx = (x1 + x2) / 2;
+            const my = (y1 + y2) / 2;
+            ctx.save();
+            ctx.translate(mx, my);
+            ctx.rotate(angle);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(labelText, 0, -3);
+            ctx.restore();
+          };
+
+          // A. Tangent Dimension (Ts / Tc)
+          const dimOffset = 22;
+          const normX = -Math.sin(alpha);
+          const normY = Math.cos(alpha);
+          const dt1 = { x: scrTC.x - normX * dimOffset, y: scrTC.y - normY * dimOffset };
+          const dt2 = { x: scrPI.x - normX * dimOffset, y: scrPI.y - normY * dimOffset };
+
+          // Extension lines
+          ctx.beginPath();
+          ctx.moveTo(scrTC.x, scrTC.y);
+          ctx.lineTo(dt1.x, dt1.y);
+          ctx.moveTo(scrPI.x, scrPI.y);
+          ctx.lineTo(dt2.x, dt2.y);
+          ctx.stroke();
+
+          const tangenLabel = cadCurveType === 'FC' ? `Tc: ${T.toFixed(2)} m` : `Ts: ${T.toFixed(2)} m`;
+          drawDimLine(dt1.x, dt1.y, dt2.x, dt2.y, tangenLabel);
+
+          // B. External Distance Dimension (Ec / Es)
+          const de1 = scrPI;
+          const de2 = scrApex;
+          ctx.beginPath();
+          ctx.moveTo(de1.x, de1.y);
+          ctx.lineTo(de2.x, de2.y);
+          ctx.stroke();
+          // Dimension text along vertical axis
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          const ecLabel = cadCurveType === 'FC' ? `Ec: ${E.toFixed(3)} m` : `Es: ${E.toFixed(3)} m`;
+          ctx.fillText(ecLabel, de1.x + 5, (de1.y + de2.y) / 2);
+
+          // C. Deflection Angle (Δ) Arc at PI
+          const arcR = 32;
+          ctx.beginPath();
+          ctx.arc(scrPI.x, scrPI.y, arcR, Math.PI / 2 - alpha, Math.PI / 2 + alpha, false);
+          ctx.stroke();
+          ctx.textAlign = 'center';
+          ctx.fillText(`Δ: ${deltaDeg.toFixed(1)}°`, scrPI.x + 36, scrPI.y + 16);
+
+          // D. Curve Length Dimension (Lc / Ltot) below curve
+          const scrLc1 = scrTC;
+          const scrLc2 = scrCT;
+          const lcOffsetY = 24;
+          const dlc1 = { x: scrLc1.x, y: scrLc1.y + lcOffsetY };
+          const dlc2 = { x: scrLc2.x, y: scrLc2.y + lcOffsetY };
+
+          ctx.beginPath();
+          ctx.moveTo(scrLc1.x, scrLc1.y);
+          ctx.lineTo(dlc1.x, dlc1.y);
+          ctx.moveTo(scrLc2.x, scrLc2.y);
+          ctx.lineTo(dlc2.x, dlc2.y);
+          ctx.stroke();
+
+          const lcLabel = cadCurveType === 'FC' 
+            ? `Lc : ${g.Lc.toFixed(2)} m` 
+            : (cadCurveType === 'SCS' ? `Lc: ${g.Lc.toFixed(2)} m | Ls: ${g.Ls.toFixed(2)} m` : `Ltot: ${g.Ltot.toFixed(2)} m`);
+          drawDimLine(dlc1.x, dlc1.y, dlc2.x, dlc2.y, lcLabel);
+
+          // E. Radius Dimension (R)
+          const midArcScr = toScr(0, O_y + R);
+          const radMidScr = toScr(R * 0.15, O_y + R * 0.5);
+          ctx.save();
+          ctx.textAlign = 'left';
+          ctx.fillText(`R: ${R.toFixed(0)} m`, radMidScr.x + 10, radMidScr.y);
+          ctx.restore();
+
+          ctx.restore();
+
+          cadHitEntitiesRef.current.push({
+            id: 'dimensi_notasi_all',
+            name: 'Anotasi & Notasi Dimensi CAD',
+            layer: 'DIMENSI_NOTASI',
+            value: `Ts=${T.toFixed(2)}m, Es=${E.toFixed(3)}m, Lc=${g.Lc.toFixed(2)}m, R=${R}m, Δ=${deltaDeg.toFixed(1)}°`,
+            formula: 'Format Dimensi Gambar Kerja Standar ISO / Bina Marga',
+            desc: 'Dimensi resmi untuk pembacaan gambar kerja oleh kontraktor dan pengawas lapangan dalam menentukan titik staking out.',
+            standard: 'PDGJ 2021 & Gambar Standar Bina Marga',
+            hitDist: (sx, sy) => Math.min(
+              distToSegment(sx, sy, dt1.x, dt1.y, dt2.x, dt2.y),
+              distToSegment(sx, sy, dlc1.x, dlc1.y, dlc2.x, dlc2.y),
+              Math.hypot(sx - scrPI.x, sy - scrPI.y)
+            )
+          });
+        }
+
+        // 7. LAYER: TITIK_KONTROL (Control Points & Crosshairs)
+        if (cadLayers.TITIK_KONTROL) {
+          ctx.save();
+          ctx.fillStyle = '#0f172a';
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 1.2;
+          ctx.font = 'bold 10px "Plus Jakarta Sans", sans-serif';
+
+          const drawPointMarker = (pt, label, align = 'center', baseline = 'bottom') => {
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Crosshair
+            ctx.beginPath();
+            ctx.moveTo(pt.x - 5, pt.y);
+            ctx.lineTo(pt.x + 5, pt.y);
+            ctx.moveTo(pt.x, pt.y - 5);
+            ctx.lineTo(pt.x, pt.y + 5);
+            ctx.stroke();
+
+            ctx.textAlign = align;
+            ctx.textBaseline = baseline;
+            ctx.fillText(label, pt.x, pt.y - 7);
+          };
+
+          drawPointMarker(scrPI, 'PI', 'center', 'bottom');
+
+          if (cadCurveType === 'FC') {
+            drawPointMarker(scrTC, 'TC', 'right', 'bottom');
+            drawPointMarker(scrCT, 'CT', 'left', 'bottom');
+          } else if (cadCurveType === 'SCS') {
+            drawPointMarker(scrTC, 'TS', 'right', 'bottom');
+            drawPointMarker(scrCT, 'ST', 'left', 'bottom');
+            const scrSC = toScr(SC_pt.x, SC_pt.y);
+            const scrCS = toScr(CS_pt.x, CS_pt.y);
+            drawPointMarker(scrSC, 'SC', 'right', 'bottom');
+            drawPointMarker(scrCS, 'CS', 'left', 'bottom');
+          } else {
+            drawPointMarker(scrTC, 'TS', 'right', 'bottom');
+            drawPointMarker(scrCT, 'ST', 'left', 'bottom');
+            drawPointMarker(scrApex, 'SS', 'center', 'bottom');
+          }
+
+          drawPointMarker(scrO, 'O (Pusat R)', 'center', 'top');
+          ctx.restore();
+
+          cadHitEntitiesRef.current.push({
+            id: 'titik_kontrol_group',
+            name: 'Titik Kontrol Staking Out (PI, TC/TS, CT/ST, O)',
+            layer: 'TITIK_KONTROL',
+            value: `Koordinat Relatif PI (0, 0)`,
+            formula: 'Staking Out Titik Tangen & Pusat Tikungan',
+            desc: 'Titik-titik kontrol geodesi utama yang dipatok di lapangan menggunakan Total Station atau GPS Geodetik saat pelaksanaan konstruksi jalan raya.',
+            standard: 'PDGJ 2021 & Spesifikasi Umum Bina Marga',
+            hitDist: (sx, sy) => Math.min(
+              Math.hypot(sx - scrPI.x, sy - scrPI.y),
+              Math.hypot(sx - scrTC.x, sy - scrTC.y),
+              Math.hypot(sx - scrCT.x, sy - scrCT.y),
+              Math.hypot(sx - scrO.x, sy - scrO.y)
+            )
+          });
+        }
+
+        // 8. LAYER: KOP_ETIKET - DETAIL TITLE & SURVEYOR EMBLEM (Bottom Left / Center)
+        if (cadLayers.KOP_ETIKET) {
+          ctx.save();
+          // Emblem position at lower left
+          const embX = Math.max(70, w * 0.32 + cadPan.x * 0.3);
+          const embY = Math.min(h - 55, h * 0.88 + cadPan.y * 0.3);
+          const embR = 14;
+
+          // Surveyor North / Detail Circular Emblem (4 quadrants, 2 black filled)
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(embX, embY, embR, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.fillStyle = '#0f172a';
+          // Top-Left quadrant
+          ctx.beginPath();
+          ctx.moveTo(embX, embY);
+          ctx.arc(embX, embY, embR, Math.PI, 1.5 * Math.PI);
+          ctx.fill();
+
+          // Bottom-Right quadrant
+          ctx.beginPath();
+          ctx.moveTo(embX, embY);
+          ctx.arc(embX, embY, embR, 0, 0.5 * Math.PI);
+          ctx.fill();
+
+          // Cross lines inside circle
+          ctx.beginPath();
+          ctx.moveTo(embX - embR, embY);
+          ctx.lineTo(embX + embR, embY);
+          ctx.moveTo(embX, embY - embR);
+          ctx.lineTo(embX, embY + embR);
+          ctx.stroke();
+
+          // Double horizontal underline
+          const textStartX = embX + embR + 10;
+          const lineEndX = textStartX + 180;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(textStartX, embY + 2);
+          ctx.lineTo(lineEndX, embY + 2);
+          ctx.moveTo(textStartX, embY + 5);
+          ctx.lineTo(lineEndX, embY + 5);
+          ctx.stroke();
+
+          // Title & Scale text
+          ctx.font = 'bold 11px "Plus Jakarta Sans", sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`DETAIL TIKUNGAN (${cadCurveType === 'FC' ? 'F-C' : cadCurveType === 'SCS' ? 'S-C-S' : 'S-S'})`, textStartX, embY - 1);
+
+          ctx.font = 'bold 9px "JetBrains Mono", monospace';
+          ctx.textBaseline = 'top';
+          ctx.fillText(`1 : ${cadScale}`, textStartX, embY + 8);
+
+          ctx.restore();
+        }
+
+        // 9. Highlight Selected Entity (Glowing halo / golden indicator)
+        if (selectedEntity) {
+          ctx.save();
+          ctx.strokeStyle = '#f59e0b';
+          ctx.fillStyle = '#f59e0b';
+          ctx.lineWidth = 3.5;
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 8;
+
+          // Draw highlight ring on selected
+          if (selectedEntity.id.includes('tangen')) {
+            ctx.beginPath();
+            ctx.moveTo(scrPin.x, scrPin.y);
+            ctx.lineTo(scrPI.x, scrPI.y);
+            ctx.lineTo(scrPout.x, scrPout.y);
+            ctx.stroke();
+          } else if (selectedEntity.id.includes('lengkung') || selectedEntity.id.includes('spiral')) {
+            ctx.beginPath();
+            ctx.arc(scrO.x, scrO.y, R * baseScale, -Math.PI / 2 - alpha, -Math.PI / 2 + alpha, false);
+            ctx.stroke();
+          } else if (selectedEntity.id.includes('garis_radial')) {
+            ctx.beginPath();
+            ctx.moveTo(scrO.x, scrO.y);
+            ctx.lineTo(scrTC.x, scrTC.y);
+            ctx.moveTo(scrO.x, scrO.y);
+            ctx.lineTo(scrCT.x, scrCT.y);
+            ctx.stroke();
+          } else if (selectedEntity.id.includes('titik')) {
+            ctx.beginPath();
+            ctx.arc(scrPI.x, scrPI.y, 8, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
+      }, [activeTab, cadCurveType, cadParams, cadScale, paperSize, cadLayers, cadPan, cadZoom, selectedEntity, darkMode, cadGeom]);
 
       // 1. Koefisien Gesek Melintang Maksimum fmax (Sukirman: 0.19 - 0.00065*Vd atau PDGJ 2021)
       const fmax = useMemo(() => {
@@ -2049,8 +2923,9 @@
                     { id: 'horizontal', label: '3. Alinyemen Horizontal' },
                     { id: 'vertical', label: '4. Alinyemen Vertikal' },
                     { id: 'profile', label: '5. Grafik Profil 2D' },
-                    { id: 'earth', label: '6. Google Earth & Satelit 3D' },
-                    { id: 'export', label: '7. Laporan & Export' }
+                    { id: 'cad', label: '6. Kanvas CAD Interaktif' },
+                    { id: 'earth', label: '7. Google Earth & Satelit 3D' },
+                    { id: 'export', label: '8. Laporan & Export' }
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -2970,7 +3845,8 @@
                           <th className="px-3 py-2.5">Ts (m)</th>
                           <th className="px-3 py-2.5">Es (m)</th>
                           <th className="px-3 py-2.5">L Total (m)</th>
-                          <th className="px-3 py-2.5 rounded-r-lg">Tipe Tikungan</th>
+                          <th className="px-3 py-2.5">Tipe Tikungan</th>
+                          <th className="px-3 py-2.5 text-center rounded-r-lg">Gambar CAD</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -3009,6 +3885,15 @@
                               }`}>
                                 {c.curveType}
                               </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <button
+                                onClick={() => openPiInCad(c)}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/40 dark:hover:bg-blue-800/60 text-blue-600 dark:text-blue-400 rounded-lg text-[11px] font-bold border border-blue-200 dark:border-blue-800 transition inline-flex items-center gap-1 shadow-sm"
+                                title="Buka gambar kerja detail di Kanvas CAD"
+                              >
+                                📐 Buka CAD
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -3346,7 +4231,723 @@
               </div>
             )}
 
-            {/* TAB 6: GOOGLE EARTH & CITRA SATELIT 3D */}
+            {/* TAB 6: KANVAS CAD INTERAKTIF */}
+            {activeTab === 'cad' && (
+              <div className="space-y-4">
+
+                {/* HEADER KANVAS CAD */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center space-x-3">
+                      <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center">
+                        <span className="w-3 h-3 rounded-full bg-blue-600 mr-2.5"></span>
+                        Kanvas CAD Interaktif
+                      </h2>
+                      <span className="px-3 py-0.5 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700">
+                        Mode: {cadGeom.typeName}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      ↓ Gulir ke area kanvas di bawah untuk mengeksplorasi gambar kerja. Anda dapat melakukan zoom, pan, dan klik pada garis/notasi.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center space-x-2 text-xs">
+                    <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                      Kertas: {paperSize} | Skala 1:{cadScale} | True Metric
+                    </span>
+                  </div>
+                </div>
+
+                {/* SUB-BAR MODE SELECTOR & CAD CONTROLS */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-3 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+                  
+                  {/* Left: Mode Buttons & Studio Toggle */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setShowCadStudio(false)}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900 text-white dark:bg-blue-600 shadow-sm transition"
+                    >
+                      Kanvas CAD Interaktif
+                    </button>
+                    <button
+                      onClick={() => setShowCadStudio(!showCadStudio)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 ${
+                        showCadStudio 
+                          ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-700' 
+                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                      }`}
+                    >
+                      ⚙️ Workspace OpenCAD Studio
+                    </button>
+
+                    <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block"></div>
+
+                    {/* Curve Type Selector (F-C, S-C-S, S-S) */}
+                    <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700 text-xs">
+                      <button
+                        onClick={() => {
+                          setCadCurveType('FC');
+                          setCadParams(prev => ({ ...prev, name: 'Detail Tikungan (F-C)' }));
+                          setSelectedEntity(null);
+                        }}
+                        className={`px-3 py-1 rounded-lg font-bold transition ${
+                          cadCurveType === 'FC'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        Full Circle (F-C)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCadCurveType('SCS');
+                          setCadParams(prev => ({ ...prev, name: 'Detail Tikungan (S-C-S)' }));
+                          setSelectedEntity(null);
+                        }}
+                        className={`px-3 py-1 rounded-lg font-bold transition ${
+                          cadCurveType === 'SCS'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        Spiral-Circle-Spiral (S-C-S)
+                      </button>
+                      <button
+                        onClick={() => {
+                          setCadCurveType('SS');
+                          setCadParams(prev => ({ ...prev, name: 'Detail Tikungan (S-S)' }));
+                          setSelectedEntity(null);
+                        }}
+                        className={`px-3 py-1 rounded-lg font-bold transition ${
+                          cadCurveType === 'SS'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        Spiral-Spiral (S-S)
+                      </button>
+                    </div>
+
+                    {/* Load from Alignment PI */}
+                    {horizCalc && horizCalc.curves && horizCalc.curves.length > 0 && (
+                      <select
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val !== '') {
+                            const found = horizCalc.curves.find(c => c.piName === val);
+                            if (found) openPiInCad(found);
+                          }
+                        }}
+                        className="text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-slate-700 dark:text-slate-300 font-medium"
+                        defaultValue=""
+                      >
+                        <option value="" disabled>Pilih dari Trase PI...</option>
+                        {horizCalc.curves.map((c, idx) => (
+                          <option key={idx} value={c.piName}>
+                            {c.piName} - {c.curveType} (R={c.R}m)
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Right: Reset & Import Actions */}
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => {
+                        // Preset demo modal or sample DXF prompt
+                        const choice = prompt("Pilih template gambar CAD:\n1. Standar Bina Marga F-C (R=1999m, Δ=11.5°)\n2. Pegunungan S-C-S (R=800m, Δ=24°, Ls=80m)\n3. Lembah Curam S-S (R=600m, Δ=8°, Ls=120m)\n\nKetik 1, 2, atau 3:", "1");
+                        if (choice === "1") {
+                          setCadCurveType('FC');
+                          setCadParams({ R: 1999, delta: 11.5, Ls: 60, Vd: 60, name: "Detail Tikungan (F-C)" });
+                        } else if (choice === "2") {
+                          setCadCurveType('SCS');
+                          setCadParams({ R: 800, delta: 24.0, Ls: 80, Vd: 60, name: "Detail Tikungan (S-C-S)" });
+                        } else if (choice === "3") {
+                          setCadCurveType('SS');
+                          setCadParams({ R: 600, delta: 8.0, Ls: 120, Vd: 50, name: "Detail Tikungan (S-S)" });
+                        }
+                        setCadPan({ x: 0, y: 0 });
+                        setCadZoom(1.0);
+                        setSelectedEntity(null);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                      title="Impor DXF / Template Vektor"
+                    >
+                      Impor DXF / SVG
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCadPan({ x: 0, y: 0 });
+                        setCadZoom(1.0);
+                        setSelectedEntity(null);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                      title="Reset posisi dan zoom gambar"
+                    >
+                      Reset Gambar
+                    </button>
+                  </div>
+                </div>
+
+                {/* OPENCAD STUDIO DRAWER / PARAMETER TUNER (WHEN EXPANDED) */}
+                {showCadStudio && (
+                  <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-slate-50 dark:from-slate-900 dark:via-blue-950/30 dark:to-slate-900 rounded-2xl p-5 shadow-sm border border-blue-200 dark:border-blue-900/60 animate-fadeIn">
+                    <div className="flex items-center justify-between pb-3 mb-3 border-b border-blue-200 dark:border-slate-800">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-base font-bold text-slate-900 dark:text-white">
+                          ⚙️ Workspace OpenCAD Studio - Parameter Tikungan
+                        </span>
+                        <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 px-2.5 py-0.5 rounded-full font-semibold">
+                          Live Parametric Drafting
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setShowCadStudio(false)}
+                        className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold px-2 py-1"
+                      >
+                        ✕ Tutup Panel
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Jari-jari Lengkung R (m):
+                        </label>
+                        <input
+                          type="number"
+                          min="50"
+                          max="5000"
+                          step="10"
+                          value={cadParams.R}
+                          onChange={(e) => setCadParams(prev => ({ ...prev, R: parseFloat(e.target.value) || 1000 }))}
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 font-mono text-slate-900 dark:text-white font-bold"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">Standar Rmin: {Rmin} m</span>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Sudut Defleksi Δ (°):
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="160"
+                          step="0.5"
+                          value={cadParams.delta}
+                          onChange={(e) => setCadParams(prev => ({ ...prev, delta: parseFloat(e.target.value) || 11.5 }))}
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 font-mono text-slate-900 dark:text-white font-bold"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">Sudut belokan tikungan</span>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Panjang Spiral Ls (m):
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="300"
+                          step="5"
+                          disabled={cadCurveType === 'FC'}
+                          value={cadCurveType === 'FC' ? 0 : cadParams.Ls}
+                          onChange={(e) => setCadParams(prev => ({ ...prev, Ls: parseFloat(e.target.value) || 60 }))}
+                          className={`w-full border rounded-lg px-3 py-1.5 font-mono font-bold ${
+                            cadCurveType === 'FC'
+                              ? 'bg-slate-100 text-slate-400 dark:bg-slate-800/40 border-slate-200'
+                              : 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white border-slate-300 dark:border-slate-700'
+                          }`}
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">
+                          {cadCurveType === 'FC' ? 'Dinonaktifkan untuk F-C' : `Kebutuhan Ls: ~${sightDistances ? '50-100' : '60'} m`}
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                          Kecepatan Rencana Vd:
+                        </label>
+                        <select
+                          value={cadParams.Vd}
+                          onChange={(e) => setCadParams(prev => ({ ...prev, Vd: parseFloat(e.target.value) || 60 }))}
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 font-mono text-slate-900 dark:text-white font-bold"
+                        >
+                          <option value="40">40 km/jam</option>
+                          <option value="50">50 km/jam</option>
+                          <option value="60">60 km/jam (Default)</option>
+                          <option value="80">80 km/jam</option>
+                          <option value="100">100 km/jam</option>
+                        </select>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">Kecepatan desain operasional</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TOOLBAR KANVAS CAD */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-2.5 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+                  
+                  {/* Left: Zoom & Scale Controls */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setCadPan({ x: 0, y: 0 });
+                        setCadZoom(1.0);
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
+                      title="Pusatkan gambar ke layar penuh"
+                    >
+                      Zoom Extents
+                    </button>
+
+                    <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5 text-xs font-bold">
+                      <button
+                        onClick={() => setCadZoom(prev => Math.min(prev * 1.25, 6.0))}
+                        className="px-2.5 py-1 rounded hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                        title="Perbesar Tampilan"
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => setCadZoom(prev => Math.max(prev / 1.25, 0.2))}
+                        className="px-2.5 py-1 rounded hover:bg-white dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                        title="Perkecil Tampilan"
+                      >
+                        -
+                      </button>
+                    </div>
+
+                    {/* Skala Input / Dropdown */}
+                    <div className="flex items-center space-x-1.5 text-xs text-slate-600 dark:text-slate-300 font-medium ml-1">
+                      <span>Skala 1:</span>
+                      <input
+                        type="number"
+                        min="100"
+                        max="20000"
+                        step="500"
+                        value={cadScale}
+                        onChange={(e) => setCadScale(parseInt(e.target.value) || 5000)}
+                        className="w-16 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 text-center font-mono font-bold text-slate-800 dark:text-white"
+                      />
+                      <select
+                        value={cadScale}
+                        onChange={(e) => setCadScale(parseInt(e.target.value))}
+                        className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1 font-mono text-slate-700 dark:text-slate-300"
+                      >
+                        <option value="500">1:500</option>
+                        <option value="1000">1:1000</option>
+                        <option value="2000">1:2000</option>
+                        <option value="5000">1:5000</option>
+                        <option value="10000">1:10000</option>
+                      </select>
+                    </div>
+
+                    <div className="h-5 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block"></div>
+
+                    {/* Kertas Selector */}
+                    <div className="flex items-center space-x-1 text-xs">
+                      <span className="text-slate-500 font-medium mr-1">Kertas:</span>
+                      <div className="inline-flex rounded-lg bg-slate-100 dark:bg-slate-800 p-0.5 border border-slate-200 dark:border-slate-700">
+                        {['A4', 'A3', 'OFF'].map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setPaperSize(p)}
+                            className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition ${
+                              paperSize === p
+                                ? 'bg-slate-900 text-white dark:bg-blue-600 shadow-sm'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Cursor Coordinate HUD */}
+                    <div className="hidden md:flex items-center text-[11px] font-mono text-slate-500 bg-slate-50 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 ml-1">
+                      <span>X: {cursorCadCoords.x.toFixed(2)} &nbsp; Y: {cursorCadCoords.y.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Right: Export & Fullscreen Actions */}
+                  <div className="flex items-center space-x-2 text-xs">
+                    <button
+                      onClick={() => {
+                        const canvas = cadCanvasRef.current;
+                        if (!canvas) return;
+                        const link = document.createElement('a');
+                        link.download = `Tikungan_${cadCurveType}_CAD_UNTIDAR.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                      }}
+                      className="px-3 py-1.5 font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-700 transition flex items-center gap-1.5"
+                      title="Unduh gambar PNG resolusi tinggi"
+                    >
+                      <span>📥</span> Unduh PNG
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        // DXF Exporter logic
+                        const g = cadGeom;
+                        const R = g.R;
+                        const delta = g.deltaDeg;
+                        const Tc = g.Tc;
+                        const Ec = g.Ec;
+                        const Lc = g.Lc;
+                        const Ls = g.Ls;
+
+                        const dxfLines = [
+                          "0", "SECTION",
+                          "2", "HEADER",
+                          "0", "ENDSEC",
+                          "0", "SECTION",
+                          "2", "TABLES",
+                          "0", "TABLE",
+                          "2", "LAYER",
+                          "70", "6",
+                          "0", "LAYER", "2", "GARIS_UTAMA", "70", "0", "62", "7", "6", "CONTINUOUS",
+                          "0", "LAYER", "2", "GARIS_SUMBU", "70", "0", "62", "1", "6", "DASHED",
+                          "0", "LAYER", "2", "GARIS_POTONG", "70", "0", "62", "4", "6", "DASHDOT",
+                          "0", "LAYER", "2", "DIMENSI_NOTASI", "70", "0", "62", "2", "6", "CONTINUOUS",
+                          "0", "LAYER", "2", "TITIK_KONTROL", "70", "0", "62", "3", "6", "CONTINUOUS",
+                          "0", "LAYER", "2", "KOP_ETIKET", "70", "0", "62", "8", "6", "CONTINUOUS",
+                          "0", "ENDTAB",
+                          "0", "ENDSEC",
+                          "0", "SECTION",
+                          "2", "ENTITIES"
+                        ];
+
+                        // Helper to add DXF LINE
+                        const addLine = (layer, x1, y1, x2, y2) => {
+                          dxfLines.push(
+                            "0", "LINE",
+                            "8", layer,
+                            "10", x1.toFixed(3), "20", y1.toFixed(3), "30", "0.0",
+                            "11", x2.toFixed(3), "21", y2.toFixed(3), "31", "0.0"
+                          );
+                        };
+
+                        // Helper to add DXF TEXT
+                        const addText = (layer, x, y, h, str) => {
+                          dxfLines.push(
+                            "0", "TEXT",
+                            "8", layer,
+                            "10", x.toFixed(3), "20", y.toFixed(3), "30", "0.0",
+                            "40", h.toFixed(3),
+                            "1", str
+                          );
+                        };
+
+                        const alpha = g.alpha;
+                        const T = g.Tc;
+                        const TC_x = -T * Math.cos(alpha);
+                        const TC_y = -T * Math.sin(alpha);
+                        const CT_x = T * Math.cos(alpha);
+                        const CT_y = -T * Math.sin(alpha);
+
+                        // Tangents
+                        addLine("GARIS_UTAMA", TC_x * 1.3, TC_y * 1.3, 0, 0);
+                        addLine("GARIS_UTAMA", 0, 0, CT_x * 1.3, CT_y * 1.3);
+
+                        // Bisector axis
+                        const O_y = -R / Math.cos(alpha);
+                        addLine("GARIS_SUMBU", 0, 50, 0, O_y - 50);
+
+                        // Radial lines
+                        addLine("GARIS_POTONG", 0, O_y, TC_x, TC_y);
+                        addLine("GARIS_POTONG", 0, O_y, CT_x, CT_y);
+
+                        // Text annotations
+                        addText("DIMENSI_NOTASI", 10, 10, 5, `PI (Delta: ${delta.toFixed(2)} deg)`);
+                        addText("DIMENSI_NOTASI", TC_x - 30, TC_y, 4, `TC / TS (Tc: ${Tc.toFixed(2)}m)`);
+                        addText("DIMENSI_NOTASI", CT_x + 10, CT_y, 4, `CT / ST`);
+                        addText("DIMENSI_NOTASI", 0, -Ec / 2, 4, `Ec: ${Ec.toFixed(3)}m`);
+                        addText("DIMENSI_NOTASI", 0, O_y + 20, 5, `R = ${R}m | Lc = ${Lc.toFixed(2)}m`);
+                        addText("KOP_ETIKET", -100, O_y - 80, 7, `DETAIL TIKUNGAN (${cadCurveType}) - SKALA 1:${cadScale}`);
+                        addText("KOP_ETIKET", -100, O_y - 95, 4, `UNIVERSITAS TIDAR - JURUSAN TEKNIK SIPIL`);
+
+                        dxfLines.push("0", "ENDSEC", "0", "EOF");
+
+                        const blob = new Blob([dxfLines.join("\n")], { type: "application/dxf" });
+                        const link = document.createElement("a");
+                        link.download = `Tikungan_${cadCurveType}_CAD_UNTIDAR.dxf`;
+                        link.href = URL.createObjectURL(blob);
+                        link.click();
+                      }}
+                      className="px-3 py-1.5 font-semibold bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 hover:bg-blue-100 rounded-xl border border-blue-200 dark:border-blue-800 transition flex items-center gap-1.5"
+                      title="Unduh file AutoCAD DXF standar"
+                    >
+                      <span>📐</span> Unduh DXF
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const el = cadContainerRef.current;
+                        if (!el) return;
+                        if (!document.fullscreenElement) {
+                          el.requestFullscreen().then(() => setCadIsFullscreen(true)).catch(err => alert(err.message));
+                        } else {
+                          document.exitFullscreen().then(() => setCadIsFullscreen(false));
+                        }
+                      }}
+                      className="px-3 py-1.5 font-semibold bg-slate-900 text-white dark:bg-slate-700 rounded-xl hover:bg-slate-800 transition flex items-center gap-1.5"
+                      title="Mode Layar Penuh"
+                    >
+                      <span>⛶</span> Fullscreen
+                    </button>
+                  </div>
+                </div>
+
+                {/* AREA UTAMA: KANVAS CAD (KIRI) & PANEL SIDEBAR (KANAN) */}
+                <div 
+                  ref={cadContainerRef}
+                  className="grid grid-cols-1 lg:grid-cols-12 gap-5 bg-white dark:bg-slate-950 p-2 rounded-2xl"
+                >
+
+                  {/* KANVAS CAD DRAWING (COL-SPAN-8 / 9) */}
+                  <div className="lg:col-span-8 xl:col-span-9 bg-slate-100 dark:bg-slate-900/90 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden relative flex flex-col justify-center items-center shadow-inner min-h-[560px]">
+                    
+                    {/* Visual paper background layer */}
+                    <canvas
+                      ref={cadCanvasRef}
+                      className="cursor-crosshair w-full h-[580px] block select-none touch-none"
+                      onMouseDown={(e) => {
+                        isDraggingCad.current = true;
+                        dragStartPos.current = { x: e.clientX, y: e.clientY };
+                        lastPanPos.current = { ...cadPan };
+                      }}
+                      onMouseMove={(e) => {
+                        const canvas = cadCanvasRef.current;
+                        if (!canvas) return;
+                        const rect = canvas.getBoundingClientRect();
+                        const clientX = e.clientX - rect.left;
+                        const clientY = e.clientY - rect.top;
+
+                        // Pan dragging
+                        if (isDraggingCad.current) {
+                          const dx = e.clientX - dragStartPos.current.x;
+                          const dy = e.clientY - dragStartPos.current.y;
+                          setCadPan({
+                            x: lastPanPos.current.x + dx,
+                            y: lastPanPos.current.y + dy
+                          });
+                        }
+
+                        // World CAD Coordinate conversion
+                        const origX = rect.width / 2 + cadPan.x;
+                        const origY = rect.height * 0.28 + cadPan.y;
+                        const scale = (rect.width / 1300) * (5000 / cadScale) * cadZoom;
+                        const worldX = (clientX - origX) / scale;
+                        const worldY = (origY - clientY) / scale;
+                        setCursorCadCoords({ x: worldX, y: worldY });
+
+                        // Hover cursor style check
+                        let isNear = false;
+                        for (const ent of cadHitEntitiesRef.current) {
+                          if (ent.hitDist && ent.hitDist(clientX, clientY) < 18) {
+                            isNear = true;
+                            break;
+                          }
+                        }
+                        canvas.style.cursor = isDraggingCad.current ? 'grabbing' : (isNear ? 'pointer' : 'crosshair');
+                      }}
+                      onMouseUp={() => {
+                        isDraggingCad.current = false;
+                      }}
+                      onMouseLeave={() => {
+                        isDraggingCad.current = false;
+                      }}
+                      onWheel={(e) => {
+                        e.preventDefault();
+                        const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+                        setCadZoom(prev => Math.max(0.2, Math.min(prev * zoomFactor, 8.0)));
+                      }}
+                      onClick={(e) => {
+                        const canvas = cadCanvasRef.current;
+                        if (!canvas) return;
+                        const rect = canvas.getBoundingClientRect();
+                        const clientX = e.clientX - rect.left;
+                        const clientY = e.clientY - rect.top;
+
+                        // Find closest entity
+                        let closest = null;
+                        let minDist = 22; // pixel tolerance
+
+                        for (const ent of cadHitEntitiesRef.current) {
+                          if (ent.hitDist) {
+                            const d = ent.hitDist(clientX, clientY);
+                            if (d < minDist) {
+                              minDist = d;
+                              closest = ent;
+                            }
+                          }
+                        }
+
+                        if (closest) {
+                          setSelectedEntity(closest);
+                        } else {
+                          setSelectedEntity(null);
+                        }
+                      }}
+                    ></canvas>
+
+                    {/* Canvas Floating Overlay Controls */}
+                    <div className="absolute bottom-3 left-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-center space-x-3 shadow-sm pointer-events-none">
+                      <span className="flex items-center">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 mr-1.5"></span>
+                        Pan: Drag Kiri Mouse
+                      </span>
+                      <span>|</span>
+                      <span>Zoom: Scroll Roda Mouse</span>
+                      <span>|</span>
+                      <span>Klik: Seleksi Garis / Parameter</span>
+                    </div>
+                  </div>
+
+                  {/* SIDEBAR KANAN: PANEL 1 (DETAIL GARIS) & PANEL 2 (LAYER CAD) (COL-SPAN-4 / 3) */}
+                  <div className="lg:col-span-4 xl:col-span-3 space-y-4">
+                    
+                    {/* PANEL 1: DETAIL GARIS & NOTASI */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center">
+                          <span className="w-2 h-2 rounded-full bg-blue-600 mr-2"></span>
+                          DETAIL GARIS &amp; NOTASI
+                        </h4>
+                        {selectedEntity && (
+                          <button
+                            onClick={() => setSelectedEntity(null)}
+                            className="text-[11px] text-blue-600 hover:text-blue-800 dark:text-blue-400 font-semibold"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Content of selected entity or default prompt */}
+                      {!selectedEntity ? (
+                        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-dashed border-slate-200 dark:border-slate-700 text-center">
+                          <div className="text-2xl mb-2">🎯</div>
+                          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-medium">
+                            Klik garis tangen, lengkung, garis jari-jari (R), atau notasi (<span className="font-mono font-bold text-blue-600 dark:text-blue-400">Ts, Ls, K, Yc, Lc, θs, θc, Δ</span>) pada kanvas untuk melihat detail parameter &amp; hasil perhitungannya.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 animate-fadeIn">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
+                              Nama Elemen
+                            </span>
+                            <div className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center justify-between">
+                              <span>{selectedEntity.name}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                {selectedEntity.layer}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="bg-slate-50 dark:bg-slate-800/80 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
+                              Nilai Terhitung (True Metric)
+                            </span>
+                            <span className="font-mono text-base font-black text-blue-600 dark:text-blue-400">
+                              {selectedEntity.value}
+                            </span>
+                          </div>
+
+                          {selectedEntity.formula && (
+                            <div>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
+                                Rumus Matematis
+                              </span>
+                              <div className="p-2.5 rounded-lg bg-slate-900 text-emerald-400 font-mono text-xs overflow-x-auto">
+                                {selectedEntity.formula}
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedEntity.desc && (
+                            <div>
+                              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
+                                Penjelasan Teknis &amp; Fungsi
+                              </span>
+                              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-blue-50/50 dark:bg-blue-950/20 p-2.5 rounded-xl border border-blue-100 dark:border-blue-900/40">
+                                {selectedEntity.desc}
+                              </p>
+                            </div>
+                          )}
+
+                          {selectedEntity.standard && (
+                            <div className="pt-1">
+                              <span className="text-[10px] text-slate-400 block">
+                                📚 Acuan: <span className="font-semibold text-slate-600 dark:text-slate-300">{selectedEntity.standard}</span>
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* PANEL 2: LAYER CAD (ON / OFF) */}
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-800">
+                      <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-slate-800">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center">
+                          <span className="w-2 h-2 rounded-full bg-indigo-600 mr-2"></span>
+                          LAYER CAD (ON / OFF)
+                        </h4>
+                        <span className="text-[11px] text-slate-400 font-mono">6 Layers</span>
+                      </div>
+
+                      <div className="space-y-2.5 text-xs">
+                        {[
+                          { key: 'GARIS_UTAMA', label: 'GARIS_UTAMA', symbol: '—', count: '3', color: 'text-slate-900 dark:text-white', desc: 'Tangen, Busur Lengkung, Spiral' },
+                          { key: 'GARIS_SUMBU', label: 'GARIS_SUMBU', symbol: '---', count: '3', color: 'text-red-500', desc: 'Sumbu Jalan & Sumbu Bagi' },
+                          { key: 'GARIS_POTONG', label: 'GARIS_POTONG', symbol: '-•-', count: '2', color: 'text-cyan-500', desc: 'Garis Jari-jari Radial ke Titik Pusat O' },
+                          { key: 'DIMENSI_NOTASI', label: 'DIMENSI_NOTASI', symbol: '📏', count: '5', color: 'text-amber-500', desc: 'Ukuran Ts, Es, Lc, Ls, R, Δ' },
+                          { key: 'TITIK_KONTROL', label: 'TITIK_KONTROL', symbol: '📍', count: '4', color: 'text-emerald-500', desc: 'Titik PI, TC, CT, TS, SC, CS, ST' },
+                          { key: 'KOP_ETIKET', label: 'KOP_ETIKET', symbol: '📋', count: '1', color: 'text-slate-500', desc: 'Batas Kertas, Kop Etiket & Skala Grafis' }
+                        ].map((layer) => (
+                          <label
+                            key={layer.key}
+                            className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer ${
+                              cadLayers[layer.key]
+                                ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white'
+                                : 'bg-transparent border-transparent opacity-40 text-slate-400'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2.5">
+                              <input
+                                type="checkbox"
+                                checked={cadLayers[layer.key]}
+                                onChange={(e) => setCadLayers(prev => ({ ...prev, [layer.key]: e.target.checked }))}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-700"
+                              />
+                              <span className={`font-mono font-bold ${layer.color}`}>{layer.symbol}</span>
+                              <span className="font-semibold text-xs tracking-tight">{layer.label}</span>
+                            </div>
+                            <span className="text-[11px] font-mono text-slate-400 font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-slate-100 dark:border-slate-800">
+                              {layer.count}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+
+            {/* TAB 7: GOOGLE EARTH & CITRA SATELIT 3D */}
             {activeTab === 'earth' && (
               <div className="space-y-6">
 
@@ -3577,7 +5178,7 @@
               </div>
             )}
 
-            {/* TAB 6: LAPORAN & EXPORT EXCEL/CSV */}
+            {/* TAB 8: LAPORAN & EXPORT EXCEL/CSV */}
             {activeTab === 'export' && (
               <div className="space-y-6">
 
