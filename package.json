@@ -1,22 +1,23 @@
 {
-  "name": "simpasi-untidar",
-  "version": "2.0.0",
-  "description": "SIMPASI (Sistem Perencanaan dan Analisis Simpang APILL) - Universitas Tidar berdasarkan PKJI 2023 & Bina Marga",
+  "name": "geometri-jalan-untidar",
+  "version": "1.0.0",
+  "description": "SID-JALAN UNTIDAR - Sistem Perencanaan Geometrik Jalan Raya berdasarkan PDGJ 2021 & Silvia Sukirman - Universitas Tidar",
   "main": "index.html",
   "scripts": {
     "start": "npx serve ."
   },
   "keywords": [
-    "simpasi",
-    "apill",
-    "pkji-2023",
-    "simpang-bersinyal",
+    "geometrik-jalan",
+    "bina-marga",
+    "pdgj-2021",
+    "silvia-sukirman",
     "teknik-sipil",
     "untidar",
     "universitas-tidar",
-    "webster",
-    "kapasitas-jalan"
+    "google-earth",
+    "stationing",
+    "kml"
   ],
-  "author": "Kintan Alifia Astari (Universitas Tidar)",
+  "author": "Kelompok 3 TS-04 (Universitas Tidar)",
   "license": "MIT"
 }
