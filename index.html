@@ -246,6 +246,103 @@
     ];
 
     // --- MAIN REACT COMPONENT ---
+    
+  // --- GEODESY, DMS & UTM ZONE UTILITIES ---
+  const UTM_ZONES_INDONESIA = [
+    { zone: "46N / 46S", number: 46, cm: 93, bounds: "90° BT - 96° BT", provinces: "Aceh Barat, Sabang, P. Weh, P. Simeulue", timezone: "WIB (UTC+7)" },
+    { zone: "47N / 47S", number: 47, cm: 99, bounds: "96° BT - 102° BT", provinces: "Aceh Timur, Sumatera Utara, Sumatera Barat, Riau", timezone: "WIB (UTC+7)" },
+    { zone: "48N / 48S", number: 48, cm: 105, bounds: "102° BT - 108° BT", provinces: "Jambi, Sumsel, Bengkulu, Lampung, Banten, DKI Jakarta, Jabar Barat, Kalbar Barat", timezone: "WIB (UTC+7)" },
+    { zone: "49S", number: 49, cm: 111, bounds: "108° BT - 114° BT", provinces: "Jawa Tengah (termasuk Magelang & UNTIDAR), DI Yogyakarta, Jabar Timur, Jatim Barat, Kalteng, Kalsel", timezone: "WIB (UTC+7)" },
+    { zone: "50S", number: 50, cm: 117, bounds: "114° BT - 120° BT", provinces: "Jawa Timur Timur, Madura, Bali, NTB, Kalimantan Timur, Kalimantan Utara", timezone: "WITA (UTC+8)" },
+    { zone: "51N / 51S", number: 51, cm: 123, bounds: "120° BT - 126° BT", provinces: "NTT, Sulawesi Selatan, Sulawesi Barat, Sulawesi Tengah, Sulawesi Tenggara", timezone: "WITA (UTC+8)" },
+    { zone: "52N / 52S", number: 52, cm: 129, bounds: "126° BT - 132° BT", provinces: "Sulawesi Utara, Gorontalo, Maluku Utara, Maluku Tengah", timezone: "WIT (UTC+9)" },
+    { zone: "53S", number: 53, cm: 135, bounds: "132° BT - 138° BT", provinces: "Papua Barat, Papua Barat Daya, Maluku Tenggara", timezone: "WIT (UTC+9)" },
+    { zone: "54S", number: 54, cm: 141, bounds: "138° BT - 144° BT", provinces: "Papua, Papua Tengah, Papua Pegunungan, Papua Selatan (Merauke)", timezone: "WIT (UTC+9)" }
+  ];
+
+  // Convert decimal degrees to DMS components & string
+  const toDMS = (val, isLat = true) => {
+    if (val === null || val === undefined || isNaN(val)) {
+      return { deg: 0, min: 0, sec: 0, dir: isLat ? 'LS' : 'BT', text: '-' };
+    }
+    const dir = isLat ? (val < 0 ? 'LS' : 'LU') : (val < 0 ? 'BB' : 'BT');
+    const absVal = Math.abs(val);
+    const deg = Math.floor(absVal);
+    const remMin = (absVal - deg) * 60;
+    const min = Math.floor(remMin);
+    const sec = parseFloat(((remMin - min) * 60).toFixed(2));
+    const text = `${deg}° ${min}' ${sec.toFixed(2)}" ${dir}`;
+    return { deg, min, sec, dir, text };
+  };
+
+  // Convert DMS components to decimal degrees
+  const fromDMS = (deg, min, sec, dir) => {
+    const d = parseFloat(deg) || 0;
+    const m = parseFloat(min) || 0;
+    const s = parseFloat(sec) || 0;
+    let val = d + m / 60 + s / 3600;
+    if (dir === 'LS' || dir === 'S' || dir === 'BB' || dir === 'W') {
+      val = -val;
+    }
+    return parseFloat(val.toFixed(6));
+  };
+
+  // Convert Lat/Lon to UTM Zone & Coordinates (WGS-84 Transverse Mercator)
+  const latLonToUtm = (lat, lon) => {
+    if (lat === null || lat === undefined || lon === null || lon === undefined) {
+      return { zoneStr: 'Zona 49S', easting: 0, northing: 0, cm: 111, bounds: '108° - 114° BT', provinceDesc: 'Jawa Tengah' };
+    }
+    const a = 6378137.0;
+    const f = 1 / 298.257223563;
+    const b = a * (1 - f);
+    const e2 = (a * a - b * b) / (a * a);
+    const e_prime2 = (a * a - b * b) / (b * b);
+    const k0 = 0.9996;
+
+    const zoneNum = Math.floor((lon + 180) / 6) + 1;
+    const hemi = lat < 0 ? 'S' : 'N';
+    const cm = (zoneNum - 1) * 6 - 180 + 3;
+    const cm_rad = (cm * Math.PI) / 180;
+
+    const lat_rad = (lat * Math.PI) / 180;
+    const lon_rad = (lon * Math.PI) / 180;
+
+    const N = a / Math.sqrt(1 - e2 * Math.sin(lat_rad) * Math.sin(lat_rad));
+    const T = Math.tan(lat_rad) * Math.tan(lat_rad);
+    const C = e_prime2 * Math.cos(lat_rad) * Math.cos(lat_rad);
+    const A = (lon_rad - cm_rad) * Math.cos(lat_rad);
+
+    const M = a * ((1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * Math.pow(e2, 3) / 256) * lat_rad
+      - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * Math.pow(e2, 3) / 1024) * Math.sin(2 * lat_rad)
+      + (15 * e2 * e2 / 256 + 45 * Math.pow(e2, 3) / 1024) * Math.sin(4 * lat_rad)
+      - (35 * Math.pow(e2, 3) / 3072) * Math.sin(6 * lat_rad));
+
+    let easting = k0 * N * (A + (1 - T + C) * Math.pow(A, 3) / 6 + (5 - 18 * T + T * T + 72 * C - 58 * e_prime2) * Math.pow(A, 5) / 120) + 500000.0;
+    let northing = k0 * (M + N * Math.tan(lat_rad) * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * Math.pow(A, 4) / 24 + (61 - 58 * T + T * T + 600 * C - 330 * e_prime2) * Math.pow(A, 6) / 720));
+    if (lat < 0) {
+      northing += 10000000.0;
+    }
+
+    // Match zone info
+    const matched = UTM_ZONES_INDONESIA.find(z => z.number === zoneNum) || {
+      provinces: "Wilayah Indonesia",
+      timezone: hemi === 'S' ? "WIB/WITA" : "WIB"
+    };
+
+    return {
+      zoneStr: `Zona ${zoneNum}${hemi}`,
+      zoneNumber: zoneNum,
+      hemisphere: hemi,
+      centralMeridian: cm,
+      bounds: `${cm - 3}° BT - ${cm + 3}° BT`,
+      provinces: matched.provinces,
+      timezone: matched.timezone,
+      easting: parseFloat(easting.toFixed(2)),
+      northing: parseFloat(northing.toFixed(2))
+    };
+  };
+
+
     function App() {
       // Dark Mode State
       const [darkMode, setDarkMode] = useState(() => {
@@ -266,6 +363,8 @@
 
       // Coordinate Input Mode: 'gps' (Google Earth Lat/Lon) or 'metric' (X, Y meter)
       const [coordMode, setCoordMode] = useState('gps');
+      const [coordFormat, setCoordFormat] = useState('dms'); // 'dms' (Derajat Menit Detik), 'dd' (Derajat Desimal), 'utm' (Grid UTM & Metrik)
+      const [showUtmZoneModal, setShowUtmZoneModal] = useState(false);
 
       // Quick Paste Google Earth coordinates text
       const [quickPasteText, setQuickPasteText] = useState('');
@@ -341,6 +440,12 @@
           document.documentElement.classList.remove('dark');
         }
       }, [darkMode]);
+
+      // Active UTM Zone info based on the first anchor PI
+      const activeUtm = useMemo(() => {
+        const first = piList[0] || geoAnchor;
+        return latLonToUtm(first.lat, first.lon);
+      }, [piList, geoAnchor]);
 
       // --- CALCULATIONS ENGINE BASED ON PDGJ 2021 & SILVIA SUKIRMAN ---
 
@@ -2719,6 +2824,30 @@
         };
       };
 
+      // Handler for DMS input changes
+      const handleDmsChange = (id, field, part, value) => {
+        const basePI = piList[0];
+        setPiList(piList.map(p => {
+          if (p.id === id) {
+            const currentDms = toDMS(field === 'lat' ? p.lat : p.lon, field === 'lat');
+            const d = part === 'deg' ? (parseFloat(value) || 0) : currentDms.deg;
+            const m = part === 'min' ? (parseFloat(value) || 0) : currentDms.min;
+            const s = part === 'sec' ? (parseFloat(value) || 0) : currentDms.sec;
+            const dir = part === 'dir' ? value : currentDms.dir;
+            const newDec = fromDMS(d, m, s, dir);
+
+            if (field === 'lat') {
+              const xy = syncXYFromLatLon(newDec, p.lon, basePI);
+              return { ...p, lat: newDec, x: id === basePI.id ? p.x : xy.x, y: id === basePI.id ? p.y : xy.y };
+            } else {
+              const xy = syncXYFromLatLon(p.lat, newDec, basePI);
+              return { ...p, lon: newDec, x: id === basePI.id ? p.x : xy.x, y: id === basePI.id ? p.y : xy.y };
+            }
+          }
+          return p;
+        }));
+      };
+
       // Handler for Latitude change
       const handleLatChange = (id, newLat) => {
         const basePI = piList[0];
@@ -2746,16 +2875,37 @@
       // Quick Paste Add from Google Earth coordinate string
       const handleQuickAdd = () => {
         if (!quickPasteText.trim()) return;
-        // Match formats like "-7.472615, 110.222340" or "-7.472615 110.222340"
-        const parts = quickPasteText.replace(/[,;]/g, ' ').trim().split(/\s+/);
-        if (parts.length < 2) {
-          alert("Format tidak valid! Harap masukkan format: Latitude, Longitude (contoh: -7.472615, 110.222340)");
-          return;
+        let lat = null, lon = null;
+
+        // Try DMS pattern: e.g. 7° 28' 21.41" LS, 110° 13' 20.42" BT or 7°28'21.4"S 110°13'20.4"E
+        const dmsRegex = /(\d+)\s*°\s*(\d+)\s*['′]\s*([\d.]+)\s*["″]?\s*([NSEWLSBUtkKk]+)?/gi;
+        const matches = [...quickPasteText.matchAll(dmsRegex)];
+
+        if (matches.length >= 2) {
+          const conv = (m) => {
+            const d = parseFloat(m[1]) || 0;
+            const mi = parseFloat(m[2]) || 0;
+            const s = parseFloat(m[3]) || 0;
+            const h = (m[4] || '').toUpperCase();
+            let val = d + mi / 60 + s / 3600;
+            if (h.includes('S') || h.includes('LS') || h.includes('W') || h.includes('BB')) {
+              val = -val;
+            }
+            return parseFloat(val.toFixed(6));
+          };
+          lat = conv(matches[0]);
+          lon = conv(matches[1]);
+        } else {
+          // Decimal pattern: e.g. -7.472615, 110.222340
+          const parts = quickPasteText.replace(/[,;]/g, ' ').trim().split(/\s+/);
+          if (parts.length >= 2) {
+            lat = parseFloat(parts[0]);
+            lon = parseFloat(parts[1]);
+          }
         }
-        const lat = parseFloat(parts[0]);
-        const lon = parseFloat(parts[1]);
-        if (isNaN(lat) || isNaN(lon)) {
-          alert("Nilai angka koordinat Latitude atau Longitude tidak valid!");
+
+        if (lat === null || lon === null || isNaN(lat) || isNaN(lon)) {
+          alert("Format koordinat tidak valid! Masukkan format Desimal (-7.472615, 110.222340) atau Derajat Menit Detik (7° 28' 21.41\" LS, 110° 13' 20.42\" BT)");
           return;
         }
 
@@ -2767,8 +2917,8 @@
         const newPoint = {
           id: newId,
           name: `PI-${piList.length - 1}`,
-          lat,
-          lon,
+          lat: parseFloat(lat.toFixed(6)),
+          lon: parseFloat(lon.toFixed(6)),
           x: xy.x,
           y: xy.y,
           R: 300,
@@ -3178,16 +3328,134 @@
                     </div>
                   </div>
 
-                  {/* TABLE OF PI POINTS */}
+                  {/* CARD PEMBAGIAN ZONA GEODESI & PROYEKSI UTM INDONESIA */}
+                  <div className="bg-gradient-to-r from-indigo-50 via-blue-50 to-slate-50 dark:from-slate-900 dark:via-indigo-950/40 dark:to-slate-900 rounded-2xl p-5 border border-indigo-200 dark:border-indigo-900/60 shadow-sm mb-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-indigo-100 dark:border-slate-800 gap-2">
+                      <div className="flex items-center space-x-2.5">
+                        <span className="text-lg">🗺️</span>
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
+                            Zona Geodesi &amp; Proyeksi UTM WGS-84 (Standar Bina Marga &amp; BIG)
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Sistem proyeksi Universal Transverse Mercator (UTM) dan format derajat untuk pengukuran geodesi trase jalan.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => setShowUtmZoneModal(true)}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-1.5 whitespace-nowrap self-start sm:self-auto"
+                      >
+                        <span>🧭</span> Lihat Tabel Zona 46 - 54 Indonesia
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                      <div className="bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Zona UTM Terdeteksi</span>
+                        <div className="flex items-center space-x-1.5">
+                          <span className="font-mono text-base font-black text-indigo-600 dark:text-indigo-400">{activeUtm.zoneStr}</span>
+                          <span className="text-[10px] font-semibold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-800 dark:text-indigo-300 px-1.5 py-0.5 rounded">
+                            {activeUtm.hemisphere === 'S' ? 'LS (South)' : 'LU (North)'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">WGS-84 Ellipsoid</span>
+                      </div>
+
+                      <div className="bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Meridian Tengah (CM)</span>
+                        <span className="font-mono text-base font-black text-slate-900 dark:text-white">{activeUtm.centralMeridian}° BT</span>
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">Batas: {activeUtm.bounds}</span>
+                      </div>
+
+                      <div className="bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Cakupan Wilayah Provinsi</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200 block truncate text-[11px]" title={activeUtm.provinces}>
+                          {activeUtm.provinces}
+                        </span>
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 block">{activeUtm.timezone}</span>
+                      </div>
+
+                      <div className="bg-white/80 dark:bg-slate-800/80 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/50">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Koordinat Titik Awal (Grid UTM)</span>
+                        <div className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          X: {activeUtm.easting.toLocaleString('id-ID')} m E
+                        </div>
+                        <div className="font-mono text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                          Y: {activeUtm.northing.toLocaleString('id-ID')} m N
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* FORMAT SELECTOR & TABLE OF PI POINTS */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 gap-2">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center">
+                        <span className="w-2 h-2 rounded-full bg-blue-600 mr-2"></span>
+                        Tabel Titik Koordinat Trase (PI) &amp; Stasioning
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Gunakan tombol di samping untuk beralih format Derajat Menit Detik (DMS), Desimal (°), atau Grid UTM.
+                      </p>
+                    </div>
+
+                    {/* FORMAT SWITCHER TOGGLE */}
+                    <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200 dark:border-slate-700 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setCoordFormat('dms')}
+                        className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1 ${
+                          coordFormat === 'dms'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        🧭 Derajat (DMS)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCoordFormat('dd')}
+                        className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1 ${
+                          coordFormat === 'dd'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        🌐 Desimal (DD°)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCoordFormat('utm')}
+                        className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1 ${
+                          coordFormat === 'utm'
+                            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                        }`}
+                      >
+                        📐 Grid UTM
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-xs text-left">
                       <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 uppercase font-semibold">
                         <tr>
-                          <th className="px-3 py-2.5 rounded-l-lg">Titik PI</th>
+                          <th className="px-3 py-2.5 rounded-l-lg">Titik PI &amp; Zona</th>
                           {coordMode === 'gps' ? (
                             <>
-                              <th className="px-3 py-2.5">Latitude Lintang (°)</th>
-                              <th className="px-3 py-2.5">Longitude Bujur (°)</th>
+                              <th className="px-3 py-2.5">
+                                {coordFormat === 'dms' 
+                                  ? 'Latitude Lintang (DMS: ° \' " LS/LU)' 
+                                  : (coordFormat === 'utm' ? 'UTM Northing Y (m)' : 'Latitude Lintang Desimal (°)')}
+                              </th>
+                              <th className="px-3 py-2.5">
+                                {coordFormat === 'dms' 
+                                  ? 'Longitude Bujur (DMS: ° \' " BT/BB)' 
+                                  : (coordFormat === 'utm' ? 'UTM Easting X (m)' : 'Longitude Bujur Desimal (°)')}
+                              </th>
                             </>
                           ) : (
                             <>
@@ -3208,6 +3476,7 @@
                           const nextSeg = horizCalc.segments[idx];
                           const curve = horizCalc.curves[idx - 1];
                           const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${pi.lat.toFixed(6)},${pi.lon.toFixed(6)}`;
+                          const utmInfo = latLonToUtm(pi.lat, pi.lon);
 
                           return (
                             <tr key={pi.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
@@ -3215,30 +3484,156 @@
                                 <span className="font-bold text-slate-900 dark:text-white block">
                                   {pi.name}
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  {coordMode === 'gps' ? `(X: ${pi.x}m, Y: ${pi.y}m)` : `(${pi.lat.toFixed(5)}°, ${pi.lon.toFixed(5)}°)`}
-                                </span>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                    {utmInfo.zoneStr}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono">
+                                    {coordMode === 'gps' ? `(X: ${pi.x}m, Y: ${pi.y}m)` : `(${pi.lat.toFixed(5)}°, ${pi.lon.toFixed(5)}°)`}
+                                  </span>
+                                </div>
                               </td>
 
                               {coordMode === 'gps' ? (
                                 <>
+                                  {/* LATITUDE COLUMN */}
                                   <td className="px-3 py-2.5">
-                                    <input
-                                      type="number"
-                                      step="0.000001"
-                                      value={pi.lat}
-                                      onChange={(e) => handleLatChange(pi.id, Number(e.target.value))}
-                                      className="w-28 px-2 py-1 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono font-semibold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
-                                    />
+                                    {coordFormat === 'dms' ? (
+                                      (() => {
+                                        const dms = toDMS(pi.lat, true);
+                                        return (
+                                          <div className="flex items-center space-x-1 font-mono text-xs">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="90"
+                                              value={dms.deg}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lat', 'deg', e.target.value)}
+                                              className="w-12 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Derajat Lintang (°)"
+                                            />
+                                            <span>°</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="59"
+                                              value={dms.min}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lat', 'min', e.target.value)}
+                                              className="w-10 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Menit Lintang (')"
+                                            />
+                                            <span>'</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="59.99"
+                                              step="0.01"
+                                              value={dms.sec}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lat', 'sec', e.target.value)}
+                                              className="w-14 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Detik Lintang (\")"
+                                            />
+                                            <span>"</span>
+                                            <select
+                                              value={dms.dir}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lat', 'dir', e.target.value)}
+                                              className="px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-bold text-[11px] text-slate-800 dark:text-white"
+                                            >
+                                              <option value="LS">LS</option>
+                                              <option value="LU">LU</option>
+                                            </select>
+                                          </div>
+                                        );
+                                      })()
+                                    ) : coordFormat === 'utm' ? (
+                                      <div className="font-mono text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                                        {utmInfo.northing.toLocaleString('id-ID')} m N
+                                        <span className="block text-[10px] text-slate-400 font-normal">Grid UTM WGS-84</span>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <input
+                                          type="number"
+                                          step="0.000001"
+                                          value={pi.lat}
+                                          onChange={(e) => handleLatChange(pi.id, Number(e.target.value))}
+                                          className="w-28 px-2 py-1 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono font-semibold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
+                                        />
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono block mt-0.5">
+                                          {toDMS(pi.lat, true).text}
+                                        </span>
+                                      </div>
+                                    )}
                                   </td>
+
+                                  {/* LONGITUDE COLUMN */}
                                   <td className="px-3 py-2.5">
-                                    <input
-                                      type="number"
-                                      step="0.000001"
-                                      value={pi.lon}
-                                      onChange={(e) => handleLonChange(pi.id, Number(e.target.value))}
-                                      className="w-28 px-2 py-1 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono font-semibold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
-                                    />
+                                    {coordFormat === 'dms' ? (
+                                      (() => {
+                                        const dms = toDMS(pi.lon, false);
+                                        return (
+                                          <div className="flex items-center space-x-1 font-mono text-xs">
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="180"
+                                              value={dms.deg}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lon', 'deg', e.target.value)}
+                                              className="w-12 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Derajat Bujur (°)"
+                                            />
+                                            <span>°</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="59"
+                                              value={dms.min}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lon', 'min', e.target.value)}
+                                              className="w-10 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Menit Bujur (')"
+                                            />
+                                            <span>'</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              max="59.99"
+                                              step="0.01"
+                                              value={dms.sec}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lon', 'sec', e.target.value)}
+                                              className="w-14 px-1 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-center font-bold text-slate-800 dark:text-white"
+                                              title="Detik Bujur (\")"
+                                            />
+                                            <span>"</span>
+                                            <select
+                                              value={dms.dir}
+                                              onChange={(e) => handleDmsChange(pi.id, 'lon', 'dir', e.target.value)}
+                                              className="px-1.5 py-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 font-bold text-[11px] text-slate-800 dark:text-white"
+                                            >
+                                              <option value="BT">BT</option>
+                                              <option value="BB">BB</option>
+                                            </select>
+                                          </div>
+                                        );
+                                      })()
+                                    ) : coordFormat === 'utm' ? (
+                                      <div className="font-mono text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                                        {utmInfo.easting.toLocaleString('id-ID')} m E
+                                        <span className="block text-[10px] text-slate-400 font-normal">CM: {utmInfo.centralMeridian}° BT</span>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <input
+                                          type="number"
+                                          step="0.000001"
+                                          value={pi.lon}
+                                          onChange={(e) => handleLonChange(pi.id, Number(e.target.value))}
+                                          className="w-28 px-2 py-1 text-xs rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 font-mono font-semibold text-emerald-700 dark:text-emerald-300 focus:ring-2 focus:ring-emerald-500"
+                                        />
+                                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono block mt-0.5">
+                                          {toDMS(pi.lon, false).text}
+                                        </span>
+                                      </div>
+                                    )}
                                   </td>
                                 </>
                               ) : (
@@ -3253,7 +3648,7 @@
                                         const geo = syncLatLonFromXY(val, pi.y, basePI);
                                         setPiList(piList.map(p => p.id === pi.id ? { ...p, x: val, lat: geo.lat, lon: geo.lon } : p));
                                       }}
-                                      className="w-24 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-blue-700 dark:text-blue-300 font-semibold focus:ring-2 focus:ring-blue-500"
+                                      className="w-24 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-semibold text-slate-900 dark:text-white"
                                     />
                                   </td>
                                   <td className="px-3 py-2.5">
@@ -3266,17 +3661,17 @@
                                         const geo = syncLatLonFromXY(pi.x, val, basePI);
                                         setPiList(piList.map(p => p.id === pi.id ? { ...p, y: val, lat: geo.lat, lon: geo.lon } : p));
                                       }}
-                                      className="w-24 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-blue-700 dark:text-blue-300 font-semibold focus:ring-2 focus:ring-blue-500"
+                                      className="w-24 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-semibold text-slate-900 dark:text-white"
                                     />
                                   </td>
                                 </>
                               )}
 
-                              {/* Jarak ke titik berikutnya */}
+                              {/* JARAK & ARAH */}
                               <td className="px-3 py-2.5 font-mono">
                                 {nextSeg ? (
                                   <div>
-                                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                                    <span className="font-bold text-slate-800 dark:text-slate-200 block">
                                       {nextSeg.dist.toFixed(1)} m
                                     </span>
                                     <span className="text-[10px] text-slate-400 block">
@@ -3284,90 +3679,95 @@
                                     </span>
                                   </div>
                                 ) : (
-                                  <span className="text-slate-400 italic text-[11px]">- Ujung Trase -</span>
+                                  <span className="text-slate-400">-</span>
                                 )}
                               </td>
 
-                              {/* Hasil Stationing (STA) */}
-                              <td className="px-3 py-2.5 font-mono bg-blue-50/40 dark:bg-blue-950/20">
-                                {idx === 0 ? (
-                                  <span className="px-2 py-0.5 rounded font-bold text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/60">
-                                    STA 0+000.00 (Awal)
+                              {/* HASIL STATIONING (STA) */}
+                              <td className="px-3 py-2.5 bg-blue-50/40 dark:bg-blue-950/20 font-mono">
+                                {curve ? (
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                      <span className="text-slate-500">STA PI:</span>
+                                      <strong className="text-blue-700 dark:text-blue-300">{formatSTA(curve.staPI)}</strong>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                      <span>STA TS:</span>
+                                      <span>{formatSTA(curve.staTS)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                      <span>STA ST:</span>
+                                      <span>{formatSTA(curve.staST)}</span>
+                                    </div>
+                                    <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 pt-0.5">
+                                      {curve.curveType.split(' ')[0]} (Δ={curve.deltaDeg.toFixed(1)}°)
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="font-bold text-slate-700 dark:text-slate-300">
+                                    {idx === 0 ? formatSTA(0) : (horizCalc.totalLength ? formatSTA(horizCalc.totalLength) : '-')}
                                   </span>
-                                ) : idx === piList.length - 1 ? (
-                                  <div>
-                                    <span className="px-2 py-0.5 rounded font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60">
-                                      STA {formatSTA(horizCalc.totalSTA)} (Akhir)
-                                    </span>
-                                    <span className="text-[10px] text-slate-500 block mt-0.5">
-                                      Panjang Total: {horizCalc.totalSTA?.toFixed(1)} m
-                                    </span>
-                                  </div>
-                                ) : curve ? (
-                                  <div className="space-y-0.5 text-[11px]">
-                                    <div className="font-bold text-blue-700 dark:text-blue-300">
-                                      STA PI: {curve.staPIFormatted}
-                                    </div>
-                                    <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                                      TS: {curve.staTSFormatted} | ST: {curve.staSTFormatted}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  '-'
                                 )}
                               </td>
 
+                              {/* RENCANA R */}
                               <td className="px-3 py-2.5">
-                                {isEndpoint ? (
-                                  <span className="text-slate-400 italic">- Titik Tangen -</span>
-                                ) : (
+                                {!isEndpoint ? (
                                   <input
                                     type="number"
+                                    min="50"
+                                    max="5000"
                                     value={pi.R}
-                                    placeholder={`Min: ${Rmin}`}
                                     onChange={(e) => {
                                       const val = Number(e.target.value);
                                       setPiList(piList.map(p => p.id === pi.id ? { ...p, R: val } : p));
                                     }}
-                                    className="w-24 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                                    className="w-20 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono font-bold text-blue-600 dark:text-blue-400"
                                   />
+                                ) : (
+                                  <span className="text-slate-400">-</span>
                                 )}
                               </td>
 
+                              {/* PANJANG LS */}
                               <td className="px-3 py-2.5">
-                                {isEndpoint ? (
-                                  <span className="text-slate-400 italic">-</span>
-                                ) : (
+                                {!isEndpoint ? (
                                   <input
                                     type="number"
+                                    min="0"
+                                    max="500"
                                     value={pi.Ls}
                                     onChange={(e) => {
                                       const val = Number(e.target.value);
                                       setPiList(piList.map(p => p.id === pi.id ? { ...p, Ls: val } : p));
                                     }}
-                                    className="w-20 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
+                                    className="w-16 px-2 py-1 text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-slate-800 dark:text-white"
                                   />
+                                ) : (
+                                  <span className="text-slate-400">-</span>
                                 )}
                               </td>
 
+                              {/* AKSI */}
                               <td className="px-3 py-2.5 text-center">
-                                <div className="flex items-center justify-center space-x-1.5">
+                                <div className="flex items-center justify-center space-x-1">
                                   <a
                                     href={gmapsUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="p-1.5 text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition"
-                                    title="Tinjau Titik Ini di Google Maps"
+                                    className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 hover:text-emerald-600 transition"
+                                    title="Buka titik ini di Google Maps"
                                   >
-                                    <IconExternal />
+                                    📍
                                   </a>
-                                  {!isEndpoint && piList.length > 3 && (
+                                  {!isEndpoint && (
                                     <button
+                                      type="button"
                                       onClick={() => setPiList(piList.filter(p => p.id !== pi.id))}
-                                      className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950 rounded transition"
-                                      title="Hapus PI"
+                                      className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950 rounded text-slate-400 hover:text-red-500 transition"
+                                      title="Hapus Titik PI ini"
                                     >
-                                      <IconTrash />
+                                      ✕
                                     </button>
                                   )}
                                 </div>
@@ -3422,11 +3822,14 @@
                     {/* LIVE CURSOR COORDINATE BAR */}
                     <div className="absolute bottom-2.5 left-2.5 z-20 bg-slate-900/85 text-white px-3 py-1.5 rounded-lg text-xs font-mono backdrop-blur pointer-events-none border border-slate-700/60 shadow">
                       {cursorCoords ? (
-                        <span>
-                          📍 Kursor: <strong>Lat: {cursorCoords.lat.toFixed(6)}°</strong> | <strong>Lon: {cursorCoords.lon.toFixed(6)}°</strong>
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span>📍 <strong>{toDMS(cursorCoords.lat, true).text}</strong>, <strong>{toDMS(cursorCoords.lon, false).text}</strong></span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-900/80 text-indigo-200 font-bold border border-indigo-700 font-mono">
+                            {latLonToUtm(cursorCoords.lat, cursorCoords.lon).zoneStr} | X: {latLonToUtm(cursorCoords.lat, cursorCoords.lon).easting.toFixed(0)}m E, Y: {latLonToUtm(cursorCoords.lat, cursorCoords.lon).northing.toFixed(0)}m N
+                          </span>
                         </span>
                       ) : (
-                        <span className="text-slate-400">Gerakkan mouse di atas peta untuk membaca koordinat Google Earth</span>
+                        <span className="text-slate-400">Gerakkan mouse di atas peta untuk membaca koordinat Derajat (DMS) &amp; Zona UTM</span>
                       )}
                     </div>
                   </div>
@@ -5269,7 +5672,116 @@
           </main>
 
           {/* MODAL SARAN PAKAR (EXPERT SYSTEM POPUP) */}
-          {showExpertModal && (
+          {/* MODAL PEMBAGIAN ZONA UTM INDONESIA (WGS-84) */}
+        {showUtmZoneModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+              
+              <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-xl">
+                    🗺️
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      Pembagian Zona UTM Indonesia (WGS-84)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Standar Sistem Koordinat Proyeksi Geodesi Badan Informasi Geospasial (BIG) &amp; Bina Marga
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowUtmZoneModal(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center justify-center font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* ACTIVE ZONE HIGHLIGHT BANNER */}
+              <div className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-4 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-indigo-600 dark:text-indigo-400 block">
+                    Zona Proyeksi Trase Saat Ini:
+                  </span>
+                  <span className="text-lg font-black text-indigo-950 dark:text-indigo-200 font-mono">
+                    {activeUtm.zoneStr} &nbsp;({activeUtm.hemisphere === 'S' ? 'Belahan Bumi Selatan' : 'Belahan Bumi Utara'})
+                  </span>
+                  <span className="text-xs text-slate-600 dark:text-slate-400 block mt-0.5">
+                    Meridian Tengah (CM): <strong>{activeUtm.centralMeridian}° BT</strong> &bull; Batas Bujur: <strong>{activeUtm.bounds}</strong> &bull; Zona Waktu: <strong>{activeUtm.timezone}</strong>
+                  </span>
+                </div>
+                <div className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-700 text-xs font-bold text-indigo-700 dark:text-indigo-300 whitespace-nowrap self-start sm:self-auto">
+                  📍 {geoAnchor.locationName}
+                </div>
+              </div>
+
+              {/* TABLE OF ALL INDONESIAN UTM ZONES */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                <table className="min-w-full text-xs text-left">
+                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 uppercase font-semibold">
+                    <tr>
+                      <th className="px-3.5 py-3 rounded-tl-xl">Zona UTM</th>
+                      <th className="px-3.5 py-3">Meridian Tengah (CM)</th>
+                      <th className="px-3.5 py-3">Batas Bujur (Longitude)</th>
+                      <th className="px-3.5 py-3">Cakupan Wilayah Provinsi di Indonesia</th>
+                      <th className="px-3.5 py-3 rounded-tr-xl">Zona Waktu</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {UTM_ZONES_INDONESIA.map((z, idx) => {
+                      const isActive = activeUtm.zoneNumber === z.number;
+                      return (
+                        <tr 
+                          key={idx}
+                          className={isActive 
+                            ? "bg-indigo-50/80 dark:bg-indigo-950/50 font-semibold border-l-4 border-indigo-600" 
+                            : "hover:bg-slate-50 dark:hover:bg-slate-800/50"}
+                        >
+                          <td className="px-3.5 py-3 font-mono font-bold text-indigo-700 dark:text-indigo-300">
+                            {z.zone} {isActive && <span className="ml-1.5 px-2 py-0.5 rounded text-[10px] bg-indigo-600 text-white font-sans font-bold">Aktif</span>}
+                          </td>
+                          <td className="px-3.5 py-3 font-mono font-bold text-slate-800 dark:text-slate-200">{z.cm}° BT</td>
+                          <td className="px-3.5 py-3 font-mono text-slate-600 dark:text-slate-400">{z.bounds}</td>
+                          <td className="px-3.5 py-3 text-slate-700 dark:text-slate-300">{z.provinces}</td>
+                          <td className="px-3.5 py-3 font-semibold text-emerald-600 dark:text-emerald-400">{z.timezone}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* TECHNICAL NOTE */}
+              <div className="mt-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400 space-y-1.5">
+                <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <span>💡</span> Catatan Teknis Geodesi Trase Jalan (Bina Marga):
+                </div>
+                <p>
+                  Indonesia terbagi ke dalam 9 zona UTM selebar masing-masing 6° bujur, mulai dari <strong>Zona 46 (90° - 96° BT)</strong> hingga <strong>Zona 54 (138° - 144° BT)</strong>. Wilayah Jawa Tengah, DI Yogyakarta, dan Kampus Universitas Tidar Magelang secara resmi berada pada <strong>UTM Zona 49S</strong> dengan Meridian Tengah 111° BT.
+                </p>
+                <p>
+                  Pada belahan bumi selatan (S), false northing sebesar <strong>10.000.000 meter</strong> ditambahkan agar koordinat Y selalu bernilai positif, dan false easting sebesar <strong>500.000 meter</strong> diterapkan pada meridian tengah.
+                </p>
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => setShowUtmZoneModal(false)}
+                  className="px-5 py-2 bg-slate-900 text-white dark:bg-slate-700 hover:bg-slate-800 rounded-xl font-bold text-xs shadow transition"
+                >
+                  Tutup Referensi
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        
+        {showExpertModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
               <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto space-y-5">
                 
