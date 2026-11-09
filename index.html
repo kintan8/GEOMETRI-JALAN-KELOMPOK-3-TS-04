@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Highway Road Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><rect width='48' height='48' rx='10' fill='%231e293b'/><circle cx='24' cy='14' r='6' fill='%23f59e0b'/><path d='M18 24L5 48h38L30 24H18z' fill='%230f172a'/><path d='M18 24L5 48h-3L15 24h3zm12 0l13 24h3L33 24h-3z' fill='%23cbd5e1'/><line x1='24' y1='26' x2='24' y2='30' stroke='%23fde047' stroke-width='2'/><line x1='24' y1='34' x2='24' y2='39' stroke='%23fde047' stroke-width='2.5'/><line x1='24' y1='43' x2='24' y2='48' stroke='%23fde047' stroke-width='3'/></svg>" />
+
   <title>SID-JALAN UNTIDAR | Perencanaan Geometrik Jalan PDGJ 2021 & Silvia Sukirman</title>
   
   <!-- Tailwind CSS CDN -->
@@ -78,6 +81,31 @@
     const { useState, useEffect, useMemo, useRef } = React;
 
     // --- ICON COMPONENTS (SVG Inline to avoid CDN dependencies) ---
+    // --- HIGHWAY ROAD LOGO EMBLEM COMPONENT ---
+    const IconRoadLogo = ({ className = "w-12 h-12" }) => (
+      <div 
+        className={`${className} bg-gradient-to-br from-blue-700 via-indigo-900 to-slate-900 rounded-xl p-1 shadow-md border border-amber-400/40 flex items-center justify-center flex-shrink-0 relative overflow-hidden group`}
+        title="Lambang Geometrik Jalan Raya (Highway Design)"
+      >
+        <svg viewBox="0 0 48 48" className="w-full h-full" fill="none" xmlns="http://www.w3.org/2000/svg">
+          {/* Golden Sun on Horizon */}
+          <circle cx="24" cy="14" r="6" fill="#F59E0B" opacity="0.95" />
+          {/* Mountain & Hill Contours (Topografi Medan) */}
+          <path d="M0 24L11 18L22 23L34 16L48 24V48H0V24Z" fill="#047857" opacity="0.75" />
+          <path d="M0 27L15 21L27 26L39 20L48 26V48H0V27Z" fill="#065F46" opacity="0.9" />
+          {/* Asphalt Road Perspective Vanishing to Horizon */}
+          <path d="M19 24L4 48H44L29 24H19Z" fill="#1E293B" stroke="#475569" strokeWidth="0.8" />
+          {/* Road Shoulders / Bahu Jalan Bergradien */}
+          <path d="M19 24L4 48H1L17 24H19Z" fill="#E2E8F0" />
+          <path d="M29 24L44 48H47L31 24H29Z" fill="#E2E8F0" />
+          {/* Dashed Road Markings (Marka Jalan Kuning Tengah) */}
+          <line x1="24" y1="25" x2="24" y2="28" stroke="#FDE047" strokeWidth="1.6" strokeLinecap="round" />
+          <line x1="24" y1="31" x2="24" y2="35" stroke="#FDE047" strokeWidth="2.2" strokeLinecap="round" />
+          <line x1="24" y1="39" x2="24" y2="46" stroke="#FDE047" strokeWidth="2.8" strokeLinecap="round" />
+        </svg>
+      </div>
+    );
+
     const IconSun = () => (
       <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -1953,14 +1981,18 @@
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="flex items-center justify-between h-20">
                 
-                {/* Logo & Academic Title */}
-                <div className="flex items-center space-x-4">
-                  <div className="bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex-shrink-0">
-                    <img 
-                      src="https://upload.wikimedia.org/wikipedia/commons/4/43/Logo_UNTIDAR_%28Universitas_Tidar%29_Magelang.png" 
-                      alt="Logo Universitas Tidar" 
-                      className="h-12 w-12 object-contain"
-                    />
+                {/* Logo & Academic Title with Road Logo */}
+                <div className="flex items-center space-x-3.5">
+                  <div className="flex items-center space-x-2 flex-shrink-0">
+                    <div className="bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex-shrink-0" title="Logo Universitas Tidar">
+                      <img 
+                        src="https://upload.wikimedia.org/wikipedia/commons/4/43/Logo_UNTIDAR_%28Universitas_Tidar%29_Magelang.png" 
+                        alt="Logo Universitas Tidar" 
+                        className="h-12 w-12 object-contain"
+                      />
+                    </div>
+                    {/* Logo Lambang Jalan Raya */}
+                    <IconRoadLogo className="h-12 w-12" />
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
