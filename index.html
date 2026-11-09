@@ -652,7 +652,7 @@
 
             ctx.font = '8px "JetBrains Mono", monospace';
             ctx.fillText(`SKALA 1 : ${cadScale}`, kbX + 6, kbY + 58);
-            ctx.fillText(`KLMPK 3 TS-04`, kbX + kbW * 0.62, kbY + 58);
+            ctx.fillText(`by kintan (TS-04)`, kbX + kbW * 0.52, kbY + 58);
           }
         } else {
           // Paper OFF: Clean infinite CAD workspace
@@ -3022,6 +3022,9 @@
                     <div className="flex items-center space-x-2">
                       <span className="font-extrabold text-lg sm:text-xl text-slate-900 dark:text-white tracking-tight">
                         SID-JALAN <span className="text-amber-500">UNTIDAR</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black font-mono bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-700 shadow-xs">
+                        by kintan
                       </span>
                       <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-semibold bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 rounded-full">
                         PDGJ 2021 & Sukirman
@@ -5883,23 +5886,72 @@
           )}
 
           {/* FOOTER AKADEMIK */}
-          <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-6 mt-12 transition-colors">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 dark:text-slate-400 gap-3">
-              <div className="flex items-center space-x-2">
-                <img 
-                  src="https://upload.wikimedia.org/wikipedia/commons/4/43/Logo_UNTIDAR_%28Universitas_Tidar%29_Magelang.png" 
-                  alt="Logo Untidar" 
-                  className="h-6 w-6 object-contain"
-                />
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  Universitas Tidar Magelang - Fakultas Teknik, Jurusan Teknik Sipil
-                </span>
+                    {/* FOOTER ACADEMIC WATERMARK */}
+          <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-8 mt-12 transition-colors relative overflow-hidden">
+            {/* Top decorative subtle gradient line */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-600 via-amber-500 to-indigo-600"></div>
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-5">
+              
+              {/* Left: Official UNTIDAR Logo & Department */}
+              <div className="flex items-center space-x-3.5">
+                <div className="p-1.5 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex-shrink-0" title="Logo Universitas Tidar">
+                  <img 
+                    src="https://upload.wikimedia.org/wikipedia/commons/4/43/Logo_UNTIDAR_%28Universitas_Tidar%29_Magelang.png" 
+                    alt="Logo Universitas Tidar" 
+                    className="h-11 w-11 object-contain"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="font-extrabold text-sm text-slate-900 dark:text-white tracking-tight">
+                      UNIVERSITAS TIDAR (UNTIDAR)
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
+                      Fakultas Teknik
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Program Studi S1 Teknik Sipil &bull; Perencanaan Geometrik Jalan PDGJ 2021 &amp; Silvia Sukirman
+                  </p>
+                </div>
               </div>
-              <div className="text-center sm:text-right">
-                Berdasarkan Pedoman Desain Geometrik Jalan (PDGJ 2021 Ditjen Bina Marga) &amp; Buku Silvia Sukirman (1999)
+
+              {/* Right: Official Watermark "by kintan" */}
+              <div className="flex flex-col sm:flex-row items-center gap-3 text-xs">
+                {/* Prominent Watermark Badge */}
+                <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 dark:from-amber-950/40 dark:via-orange-950/30 dark:to-amber-950/40 border border-amber-300 dark:border-amber-700 shadow-sm">
+                  <span className="text-base">✨</span>
+                  <div className="flex items-baseline space-x-1.5">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Dibuat &amp; Dikembangkan:</span>
+                    <span className="text-xs font-black font-mono tracking-tight text-amber-700 dark:text-amber-400 bg-amber-200/70 dark:bg-amber-900/70 px-2 py-0.5 rounded-md shadow-xs">
+                      by kintan
+                    </span>
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      (Kintan Alifia Astari)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-center md:text-right text-[11px] text-slate-400 font-mono">
+                  &copy; 2026 SID-JALAN UNTIDAR &bull; Kelompok 3 TS-04
+                </div>
               </div>
+
             </div>
           </footer>
+
+          {/* FLOATING CORNER WATERMARK BADGE */}
+          <div className="fixed bottom-3 right-3 z-40 hidden sm:flex items-center space-x-2 bg-white/95 dark:bg-slate-900/95 backdrop-blur px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 shadow-lg text-xs pointer-events-auto hover:scale-105 transition-all">
+            <img 
+              src="https://upload.wikimedia.org/wikipedia/commons/4/43/Logo_UNTIDAR_%28Universitas_Tidar%29_Magelang.png" 
+              alt="Logo UNTIDAR" 
+              className="h-4 w-4 object-contain"
+            />
+            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">UNTIDAR</span>
+            <span className="text-slate-300 dark:text-slate-700">&bull;</span>
+            <span className="text-[11px] font-black font-mono text-amber-600 dark:text-amber-400">by kintan</span>
+          </div>
 
         </div>
       );
