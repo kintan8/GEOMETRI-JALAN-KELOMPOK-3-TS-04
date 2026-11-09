@@ -1,0 +1,21 @@
+{
+  "name": "sid-jalan-untidar",
+  "version": "1.0.0",
+  "description": "Sistem Pakar & Kalkulator Perencanaan Geometrik Jalan berdasarkan PDGJ 2021 Bina Marga & Silvia Sukirman - Universitas Tidar Magelang",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "geometrik-jalan",
+    "bina-marga",
+    "pdgj-2021",
+    "silvia-sukirman",
+    "teknik-sipil",
+    "untidar",
+    "google-earth",
+    "kml"
+  ],
+  "author": "Jurusan Teknik Sipil Universitas Tidar",
+  "license": "MIT"
+}
